@@ -28,6 +28,7 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
 const COOKIE_SECURE = process.env.COOKIE_SECURE === 'true'; // https運用なら true
+const COOKIE_SAMESITE = process.env.COOKIE_SAMESITE || (COOKIE_SECURE ? 'none' : 'lax'); // 開発時は 'none' を設定可能
 const SESSION_SECRET = process.env.SESSION_SECRET || 'dev_secret_change_me';
 
 // フロント別オリジンの場合は CORS_ORIGIN="https://example.com,https://www.example.com"
@@ -48,6 +49,13 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 // ✅ 静的配信（注意：__dirname 公開はセキュリティ上リスクがある。可能なら public/ や dist/ のみに）
 app.use(express.static(__dirname));
 
+// ✅ Flutterアプリ配信（/app パス）
+app.use('/app', express.static(path.join(__dirname, 'parabolic_app/build/web')));
+// Flutter SPAのルーティング対応
+app.get('/app/*', (req, res) => {
+  res.sendFile(path.join(__dirname, 'parabolic_app/build/web/index.html'));
+});
+
 const sessionMiddleware = session({
   name: 'connect.sid',
   secret: SESSION_SECRET,
@@ -56,7 +64,7 @@ const sessionMiddleware = session({
   cookie: {
     httpOnly: true,
     secure: COOKIE_SECURE,
-    sameSite: COOKIE_SECURE ? 'none' : 'lax',
+    sameSite: COOKIE_SAMESITE === 'false' ? false : COOKIE_SAMESITE,
     maxAge: 1000 * 60 * 60 * 24 * 14, // 14 days
   },
 });
