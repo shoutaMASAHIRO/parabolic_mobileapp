@@ -113,13 +113,17 @@ async function ensureTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
-      email TEXT UNIQUE NOT NULL,
-      username TEXT UNIQUE NOT NULL,
+      email TEXT NOT NULL,
+      username TEXT NOT NULL,
       password_hash TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
+
+  // 既存のUNIQUE制約を削除（重複を許可）
+  await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_email_key;`);
+  await pool.query(`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_username_key;`);
 
   // ✅ emails: user_id + symbol + email の3キーで独立させる（銘柄別）
   // 新規DBではこれで作成、既存DBには下の ALTER で追従させる
@@ -541,8 +545,6 @@ app.post('/api/auth/register', async (req, res) => {
     req.session.userId = r.rows[0].id;
     return res.json({ user: r.rows[0] });
   } catch (e) {
-    const msg = String(e?.message || '');
-    if (msg.includes('duplicate key')) return res.status(409).json({ error: 'Email or username already exists.' });
     console.error(e);
     return res.status(500).json({ error: 'Server error.' });
   }
@@ -872,6 +874,221 @@ app.post('/api/send-emails', requireAuth, async (req, res) => {
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: 'Failed to send emails.' });
+  }
+});
+
+// =====================
+// API: Mobile App Threshold Settings
+// =====================
+
+// モバイルアプリ用：閾値設定を保存
+// POST /api/mobile/threshold { "symbol": "BTC-USD", "interval": "1d", "threshold": 100 }
+app.post('/api/mobile/threshold', requireAuth, async (req, res) => {
+  try {
+    const uid = req.session.userId;
+    const { symbol, interval, threshold } = req.body;
+
+    if (!symbol || !interval) {
+      return res.status(400).json({ error: 'symbol and interval are required' });
+    }
+
+    const settings = (await getUserSettings(uid)) || {};
+
+    // crypto_x_values[symbol][interval] = threshold の形式で保存
+    if (!settings.crypto_x_values || typeof settings.crypto_x_values !== 'object') {
+      settings.crypto_x_values = {};
+    }
+    if (!settings.crypto_x_values[symbol] || typeof settings.crypto_x_values[symbol] !== 'object') {
+      settings.crypto_x_values[symbol] = {};
+    }
+
+    if (threshold != null && threshold > 0) {
+      settings.crypto_x_values[symbol][interval] = threshold;
+    } else {
+      // 閾値が0またはnullの場合は削除
+      delete settings.crypto_x_values[symbol][interval];
+      // 空のオブジェクトになったら銘柄ごと削除
+      if (Object.keys(settings.crypto_x_values[symbol]).length === 0) {
+        delete settings.crypto_x_values[symbol];
+      }
+    }
+
+    await upsertUserSettings(uid, settings);
+
+    console.log(`[MOBILE THRESHOLD] User:${uid} set ${symbol}/${interval} = ${threshold}`);
+    return res.json({ ok: true, symbol, interval, threshold });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to save threshold.' });
+  }
+});
+
+// モバイルアプリ用：閾値設定を取得
+// GET /api/mobile/threshold?symbol=BTC-USD&interval=1d
+app.get('/api/mobile/threshold', requireAuth, async (req, res) => {
+  try {
+    const uid = req.session.userId;
+    const { symbol, interval } = req.query;
+
+    if (!symbol) {
+      return res.status(400).json({ error: 'symbol is required' });
+    }
+
+    const settings = (await getUserSettings(uid)) || {};
+    const cx = ensureObj(settings.crypto_x_values);
+
+    if (interval) {
+      // 特定のインターバルの閾値を取得
+      const threshold = cx[symbol]?.[interval] ?? null;
+      return res.json({ symbol, interval, threshold });
+    } else {
+      // 銘柄のすべてのインターバルの閾値を取得
+      const thresholds = cx[symbol] || {};
+      return res.json({ symbol, thresholds });
+    }
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to get threshold.' });
+  }
+});
+
+// モバイルアプリ用：インジケーター設定を保存
+// POST /api/mobile/indicator-settings { "areBollingerBandsVisible": true, "areEmaVisible": true, ... }
+app.post('/api/mobile/indicator-settings', requireAuth, async (req, res) => {
+  try {
+    const uid = req.session.userId;
+    const incoming = req.body || {};
+
+    const settings = (await getUserSettings(uid)) || {};
+
+    // インジケーター関連の設定をマージ
+    const indicatorKeys = [
+      'areBollingerBandsVisible', 'areEmaVisible',
+      'bbPeriod', 'bbStdDev',
+      'ema1Period', 'ema2Period', 'ema3Period',
+      'emailAlertsEnabled'
+    ];
+
+    for (const key of indicatorKeys) {
+      if (incoming[key] !== undefined) {
+        settings[key] = incoming[key];
+      }
+    }
+
+    await upsertUserSettings(uid, settings);
+
+    console.log(`[MOBILE INDICATOR SETTINGS] User:${uid} updated indicator settings`);
+    return res.json({ ok: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to save indicator settings.' });
+  }
+});
+
+// モバイルアプリ用：インジケーター設定を取得
+// GET /api/mobile/indicator-settings
+app.get('/api/mobile/indicator-settings', requireAuth, async (req, res) => {
+  try {
+    const uid = req.session.userId;
+    const settings = (await getUserSettings(uid)) || {};
+
+    return res.json({
+      areBollingerBandsVisible: settings.areBollingerBandsVisible ?? false,
+      areEmaVisible: settings.areEmaVisible ?? false,
+      bbPeriod: settings.bbPeriod ?? 20,
+      bbStdDev: settings.bbStdDev ?? 2,
+      ema1Period: settings.ema1Period ?? 10,
+      ema2Period: settings.ema2Period ?? 25,
+      ema3Period: settings.ema3Period ?? 50,
+      emailAlertsEnabled: settings.emailAlertsEnabled ?? false,
+    });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to get indicator settings.' });
+  }
+});
+
+// モバイルアプリ用：クロス履歴を取得（サーバーで管理している履歴）
+// GET /api/mobile/cross-history?symbol=BTC-USD
+app.get('/api/mobile/cross-history', requireAuth, async (req, res) => {
+  try {
+    const uid = req.session.userId;
+    const { symbol } = req.query;
+
+    if (!symbol) {
+      return res.status(400).json({ error: 'symbol is required' });
+    }
+
+    const settings = (await getUserSettings(uid)) || {};
+    const rt = ensureRealTimeState(settings);
+    const root = rt.cryptoCrossHistoryByTicker || {};
+
+    const history = root[symbol] || {};
+    return res.json({ symbol, history });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to get cross history.' });
+  }
+});
+
+// モバイルアプリ用：クロス履歴をクリア
+// DELETE /api/mobile/cross-history?symbol=BTC-USD
+app.delete('/api/mobile/cross-history', requireAuth, async (req, res) => {
+  try {
+    const uid = req.session.userId;
+    const { symbol } = req.query;
+
+    if (!symbol) {
+      return res.status(400).json({ error: 'symbol is required' });
+    }
+
+    const settings = (await getUserSettings(uid)) || {};
+    const rt = ensureRealTimeState(settings);
+
+    if (rt.cryptoCrossHistoryByTicker && rt.cryptoCrossHistoryByTicker[symbol]) {
+      delete rt.cryptoCrossHistoryByTicker[symbol];
+    }
+
+    settings.realTimeState = rt;
+    await upsertUserSettings(uid, settings);
+
+    console.log(`[MOBILE CROSS HISTORY CLEAR] User:${uid} cleared ${symbol}`);
+    return res.json({ ok: true, symbol });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to clear cross history.' });
+  }
+});
+
+// 閾値達成メール送信（Flutterアプリ用）
+// POST /api/send-threshold-email { "symbol": "BTC-USD", "subject": "...", "body": "..." }
+app.post('/api/send-threshold-email', requireAuth, async (req, res) => {
+  try {
+    const uid = req.session.userId;
+    const { symbol, subject, body } = req.body;
+
+    if (!symbol || !subject || !body) {
+      return res.status(400).json({ error: 'symbol, subject, body are required' });
+    }
+
+    const normalizedSymbol = normalizeSymbol(symbol, 'GLOBAL');
+    const recipients = await getRecipientsForSymbol(uid, normalizedSymbol);
+
+    if (recipients.length === 0) {
+      return res.json({ message: '送信先がありません。', sent: false });
+    }
+
+    await sendMail({
+      to: recipients.join(','),
+      subject: subject,
+      text: body,
+    });
+
+    console.log(`[THRESHOLD EMAIL SENT] User:${uid} for ${normalizedSymbol}`);
+    return res.json({ message: `閾値達成メールを送信しました。（${normalizedSymbol}）`, sent: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to send threshold email.' });
   }
 });
 
