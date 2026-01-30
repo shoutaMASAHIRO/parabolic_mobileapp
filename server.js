@@ -1092,6 +1092,43 @@ app.post('/api/send-threshold-email', requireAuth, async (req, res) => {
   }
 });
 
+// テストメール送信（Flutterアプリ用）
+// POST /api/test-email { "symbol": "BTC-USD" }
+app.post('/api/test-email', requireAuth, async (req, res) => {
+  try {
+    const uid = req.session.userId;
+    const { symbol } = req.body;
+
+    const normalizedSymbol = normalizeSymbol(symbol, 'GLOBAL');
+    const recipients = await getRecipientsForSymbol(uid, normalizedSymbol);
+
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: '送信先メールアドレスが登録されていません。' });
+    }
+
+    const subject = `【テスト】Parabolic通知テスト (${normalizedSymbol})`;
+    const body = `これはParabolicからのテストメールです。
+
+銘柄: ${normalizedSymbol}
+送信先: ${recipients.join(', ')}
+送信日時: ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+
+このメールが届いていれば、メール通知は正常に動作しています。`;
+
+    await sendMail({
+      to: recipients.join(','),
+      subject: subject,
+      text: body,
+    });
+
+    console.log(`[TEST EMAIL SENT] User:${uid} for ${normalizedSymbol}`);
+    return res.json({ message: 'テストメールを送信しました。', sent: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'テストメールの送信に失敗しました。' });
+  }
+});
+
 // =====================
 // API: Market data (for client charts)
 // =====================
@@ -1131,6 +1168,21 @@ app.get('/api/usd_jpy_data', async (req, res) => {
   } catch (e) {
     console.error(e);
     return res.status(500).json({ error: 'Failed to fetch USDJPY data.' });
+  }
+});
+
+// 現在のUSD/JPYレートを取得
+app.get('/api/forex/usdjpy', async (req, res) => {
+  try {
+    const candles = await getCandlesWithCache('USDJPY=X', '1d');
+    if (candles && candles.length > 0) {
+      const latestCandle = candles[candles.length - 1];
+      return res.json({ rate: latestCandle.close });
+    }
+    return res.status(404).json({ error: 'No rate available' });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to fetch USDJPY rate.' });
   }
 });
 

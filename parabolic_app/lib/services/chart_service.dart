@@ -179,4 +179,24 @@ $symbolの${crossEvent.displayName}クロスが閾値に達しました。
 
     return response.isSuccess;
   }
+
+  // テストメール送信
+  Future<bool> sendTestEmail({required String symbol}) async {
+    final response = await _api.post('/api/test-email', {
+      'symbol': symbol,
+    });
+    return response.isSuccess;
+  }
+
+  // USD/JPY為替レートを取得
+  Future<double?> getUsdJpyRate() async {
+    final response = await _api.get('/api/forex/usdjpy');
+    if (response.isSuccess && response.json != null) {
+      final rate = response.json!['rate'];
+      if (rate != null) {
+        return (rate as num).toDouble();
+      }
+    }
+    return null;
+  }
 }
