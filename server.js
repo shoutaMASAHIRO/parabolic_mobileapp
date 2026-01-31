@@ -224,7 +224,10 @@ function getSessionUserId(req) {
 
 function requireAuth(req, res, next) {
   const uid = getSessionUserId(req);
-  if (!uid) return res.status(401).json({ error: 'Not authenticated.' });
+  if (!uid) {
+    console.log('[requireAuth] Failed - no session userId. Path:', req.path);
+    return res.status(401).json({ error: 'Not authenticated.' });
+  }
   next();
 }
 
@@ -1092,6 +1095,43 @@ app.post('/api/send-threshold-email', requireAuth, async (req, res) => {
   }
 });
 
+// テストメール送信（Flutterアプリ用）
+// POST /api/test-email { "symbol": "BTC-USD" }
+app.post('/api/test-email', requireAuth, async (req, res) => {
+  try {
+    const uid = req.session.userId;
+    const { symbol } = req.body;
+
+    const normalizedSymbol = normalizeSymbol(symbol, 'GLOBAL');
+    const recipients = await getRecipientsForSymbol(uid, normalizedSymbol);
+
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: '送信先メールアドレスが登録されていません。' });
+    }
+
+    const subject = `【テスト】Parabolic通知テスト (${normalizedSymbol})`;
+    const body = `これはParabolicからのテストメールです。
+
+銘柄: ${normalizedSymbol}
+送信先: ${recipients.join(', ')}
+送信日時: ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}
+
+このメールが届いていれば、メール通知は正常に動作しています。`;
+
+    await sendMail({
+      to: recipients.join(','),
+      subject: subject,
+      text: body,
+    });
+
+    console.log(`[TEST EMAIL SENT] User:${uid} for ${normalizedSymbol}`);
+    return res.json({ message: 'テストメールを送信しました。', sent: true });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'テストメールの送信に失敗しました。' });
+  }
+});
+
 // =====================
 // API: Market data (for client charts)
 // =====================
@@ -1134,9 +1174,508 @@ app.get('/api/usd_jpy_data', async (req, res) => {
   }
 });
 
-// 例：プルダウン用
+// 現在のUSD/JPYレートを取得
+app.get('/api/forex/usdjpy', async (req, res) => {
+  try {
+    const candles = await getCandlesWithCache('USDJPY=X', '1d');
+    if (candles && candles.length > 0) {
+      const latestCandle = candles[candles.length - 1];
+      return res.json({ rate: latestCandle.close });
+    }
+    return res.status(404).json({ error: 'No rate available' });
+  } catch (e) {
+    console.error(e);
+    return res.status(500).json({ error: 'Failed to fetch USDJPY rate.' });
+  }
+});
+
+// デフォルト暗号通貨リスト
+const DEFAULT_CRYPTO = [
+  { symbol: 'BTC-USD', displayName: 'Bitcoin', description: 'ビットコイン' },
+  { symbol: 'ETH-USD', displayName: 'Ethereum', description: 'イーサリアム' },
+  { symbol: 'BCH-USD', displayName: 'Bitcoin Cash', description: 'ビットコインキャッシュ' },
+  { symbol: 'SOL-USD', displayName: 'Solana', description: 'ソラナ' },
+  { symbol: 'XRP-USD', displayName: 'XRP', description: 'リップル' },
+  { symbol: 'DOGE-USD', displayName: 'Dogecoin', description: 'ドージコイン' },
+];
+
+// デフォルト為替リスト
+const DEFAULT_FOREX = [
+  { symbol: 'USDJPY=X', displayName: 'USD/JPY', description: '米ドル/円' },
+  { symbol: 'EURJPY=X', displayName: 'EUR/JPY', description: 'ユーロ/円' },
+  { symbol: 'GBPJPY=X', displayName: 'GBP/JPY', description: '英ポンド/円' },
+  { symbol: 'AUDJPY=X', displayName: 'AUD/JPY', description: '豪ドル/円' },
+  { symbol: 'EURUSD=X', displayName: 'EUR/USD', description: 'ユーロ/米ドル' },
+  { symbol: 'GBPUSD=X', displayName: 'GBP/USD', description: '英ポンド/米ドル' },
+  { symbol: 'AUDUSD=X', displayName: 'AUD/USD', description: '豪ドル/米ドル' },
+  { symbol: 'NZDUSD=X', displayName: 'NZD/USD', description: 'NZドル/米ドル' },
+];
+
+// 暗号通貨銘柄リスト（ユーザー設定を反映）
 app.get('/api/crypto/tickers', async (req, res) => {
-  return res.json(['BTC-USD', 'ETH-USD', 'BCH-USD', 'SOL-USD', 'XRP-USD', 'DOGE-USD']);
+  const userId = getSessionUserId(req);
+
+  if (!userId) {
+    return res.json(DEFAULT_CRYPTO);
+  }
+
+  try {
+    const settings = await getUserSettings(userId);
+    const cryptoConfig = settings?.cryptoConfig || { hiddenCrypto: [], addedCrypto: [] };
+    const hiddenCrypto = cryptoConfig.hiddenCrypto || [];
+    const addedCrypto = cryptoConfig.addedCrypto || [];
+
+    const visibleDefaults = DEFAULT_CRYPTO.filter(c => !hiddenCrypto.includes(c.symbol));
+    const visibleSymbols = new Set(visibleDefaults.map(c => c.symbol));
+    const uniqueAdded = addedCrypto.filter(c => !visibleSymbols.has(c.symbol));
+
+    return res.json([...visibleDefaults, ...uniqueAdded]);
+  } catch (err) {
+    console.error('Error getting crypto tickers:', err);
+    return res.json(DEFAULT_CRYPTO);
+  }
+});
+
+// 暗号通貨検索（Yahoo Finance APIを使用）
+app.get('/api/crypto/search', async (req, res) => {
+  const query = req.query.q;
+
+  if (!query || query.length < 1) {
+    return res.json([]);
+  }
+
+  try {
+    const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=20&newsCount=0&listsCount=0&enableFuzzyQuery=false&quotesQueryId=tss_match_phrase_query`;
+
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    if (!response.ok) {
+      return res.json([]);
+    }
+
+    const data = await response.json();
+    const quotes = data.quotes || [];
+
+    // 暗号通貨のみをフィルタリング（CRYPTOCURRENCY型）
+    const cryptos = quotes
+      .filter(q => q.quoteType === 'CRYPTOCURRENCY')
+      .map(q => ({
+        symbol: q.symbol,
+        displayName: q.shortname || q.longname || q.symbol.replace('-USD', ''),
+        description: q.longname || q.shortname || '',
+      }));
+
+    return res.json(cryptos);
+  } catch (err) {
+    console.error('Crypto search error:', err);
+    return res.json([]);
+  }
+});
+
+// 暗号通貨を追加
+app.post('/api/user/crypto-config/add', requireAuth, async (req, res) => {
+  const userId = getSessionUserId(req);
+  const { symbol, displayName, description } = req.body;
+
+  if (!symbol) {
+    return res.status(400).json({ error: 'Symbol is required' });
+  }
+
+  try {
+    const settings = await getUserSettings(userId) || {};
+    const cryptoConfig = settings.cryptoConfig || { hiddenCrypto: [], addedCrypto: [] };
+
+    const isDefault = DEFAULT_CRYPTO.some(c => c.symbol === symbol);
+    if (isDefault) {
+      cryptoConfig.hiddenCrypto = (cryptoConfig.hiddenCrypto || []).filter(s => s !== symbol);
+    } else {
+      const alreadyAdded = (cryptoConfig.addedCrypto || []).some(c => c.symbol === symbol);
+      if (!alreadyAdded) {
+        cryptoConfig.addedCrypto = cryptoConfig.addedCrypto || [];
+        cryptoConfig.addedCrypto.push({ symbol, displayName, description });
+      }
+    }
+
+    settings.cryptoConfig = cryptoConfig;
+    await upsertUserSettings(userId, settings);
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('Error adding crypto:', err);
+    return res.status(500).json({ error: 'Failed to add crypto' });
+  }
+});
+
+// 暗号通貨を非表示（削除）
+app.post('/api/user/crypto-config/hide', requireAuth, async (req, res) => {
+  const userId = getSessionUserId(req);
+  const { symbol } = req.body;
+
+  if (!symbol) {
+    return res.status(400).json({ error: 'Symbol is required' });
+  }
+
+  try {
+    const settings = await getUserSettings(userId) || {};
+    const cryptoConfig = settings.cryptoConfig || { hiddenCrypto: [], addedCrypto: [] };
+
+    const isDefault = DEFAULT_CRYPTO.some(c => c.symbol === symbol);
+    if (isDefault) {
+      cryptoConfig.hiddenCrypto = cryptoConfig.hiddenCrypto || [];
+      if (!cryptoConfig.hiddenCrypto.includes(symbol)) {
+        cryptoConfig.hiddenCrypto.push(symbol);
+      }
+    }
+
+    cryptoConfig.addedCrypto = (cryptoConfig.addedCrypto || []).filter(c => c.symbol !== symbol);
+
+    settings.cryptoConfig = cryptoConfig;
+    await upsertUserSettings(userId, settings);
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('Error hiding crypto:', err);
+    return res.status(500).json({ error: 'Failed to hide crypto' });
+  }
+});
+
+// 為替銘柄リスト（ユーザー設定を反映）
+app.get('/api/forex/tickers', async (req, res) => {
+  const userId = getSessionUserId(req);
+
+  if (!userId) {
+    return res.json(DEFAULT_FOREX);
+  }
+
+  try {
+    const settings = await getUserSettings(userId);
+    const forexConfig = settings?.forexConfig || { hiddenForex: [], addedForex: [] };
+    const hiddenForex = forexConfig.hiddenForex || [];
+    const addedForex = forexConfig.addedForex || [];
+
+    const visibleDefaults = DEFAULT_FOREX.filter(f => !hiddenForex.includes(f.symbol));
+    const visibleSymbols = new Set(visibleDefaults.map(f => f.symbol));
+    const uniqueAdded = addedForex.filter(f => !visibleSymbols.has(f.symbol));
+
+    return res.json([...visibleDefaults, ...uniqueAdded]);
+  } catch (err) {
+    console.error('Error getting forex tickers:', err);
+    return res.json(DEFAULT_FOREX);
+  }
+});
+
+// 為替検索（Yahoo Finance APIを使用）
+app.get('/api/forex/search', async (req, res) => {
+  const query = req.query.q;
+
+  if (!query || query.length < 1) {
+    return res.json([]);
+  }
+
+  try {
+    const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=20&newsCount=0&listsCount=0&enableFuzzyQuery=false&quotesQueryId=tss_match_phrase_query`;
+
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    if (!response.ok) {
+      return res.json([]);
+    }
+
+    const data = await response.json();
+    const quotes = data.quotes || [];
+
+    // 為替のみをフィルタリング（CURRENCY型）
+    const forex = quotes
+      .filter(q => q.quoteType === 'CURRENCY')
+      .map(q => {
+        const symbol = q.symbol;
+        const pair = symbol.replace('=X', '');
+        const displayName = pair.length === 6 ? `${pair.substring(0, 3)}/${pair.substring(3)}` : symbol;
+        return {
+          symbol: symbol,
+          displayName: displayName,
+          description: q.longname || q.shortname || displayName,
+        };
+      });
+
+    return res.json(forex);
+  } catch (err) {
+    console.error('Forex search error:', err);
+    return res.json([]);
+  }
+});
+
+// 為替を追加
+app.post('/api/user/forex-config/add', requireAuth, async (req, res) => {
+  const userId = getSessionUserId(req);
+  const { symbol, displayName, description } = req.body;
+
+  if (!symbol) {
+    return res.status(400).json({ error: 'Symbol is required' });
+  }
+
+  try {
+    const settings = await getUserSettings(userId) || {};
+    const forexConfig = settings.forexConfig || { hiddenForex: [], addedForex: [] };
+
+    const isDefault = DEFAULT_FOREX.some(f => f.symbol === symbol);
+    if (isDefault) {
+      forexConfig.hiddenForex = (forexConfig.hiddenForex || []).filter(s => s !== symbol);
+    } else {
+      const alreadyAdded = (forexConfig.addedForex || []).some(f => f.symbol === symbol);
+      if (!alreadyAdded) {
+        forexConfig.addedForex = forexConfig.addedForex || [];
+        forexConfig.addedForex.push({ symbol, displayName, description });
+      }
+    }
+
+    settings.forexConfig = forexConfig;
+    await upsertUserSettings(userId, settings);
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('Error adding forex:', err);
+    return res.status(500).json({ error: 'Failed to add forex' });
+  }
+});
+
+// 為替を非表示（削除）
+app.post('/api/user/forex-config/hide', requireAuth, async (req, res) => {
+  const userId = getSessionUserId(req);
+  const { symbol } = req.body;
+
+  if (!symbol) {
+    return res.status(400).json({ error: 'Symbol is required' });
+  }
+
+  try {
+    const settings = await getUserSettings(userId) || {};
+    const forexConfig = settings.forexConfig || { hiddenForex: [], addedForex: [] };
+
+    const isDefault = DEFAULT_FOREX.some(f => f.symbol === symbol);
+    if (isDefault) {
+      forexConfig.hiddenForex = forexConfig.hiddenForex || [];
+      if (!forexConfig.hiddenForex.includes(symbol)) {
+        forexConfig.hiddenForex.push(symbol);
+      }
+    }
+
+    forexConfig.addedForex = (forexConfig.addedForex || []).filter(f => f.symbol !== symbol);
+
+    settings.forexConfig = forexConfig;
+    await upsertUserSettings(userId, settings);
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('Error hiding forex:', err);
+    return res.status(500).json({ error: 'Failed to hide forex' });
+  }
+});
+
+// デフォルト株式リスト
+const DEFAULT_STOCKS = [
+  // 米国株
+  { symbol: 'AAPL', displayName: 'Apple', description: 'アップル (NASDAQ)' },
+  { symbol: 'GOOGL', displayName: 'Alphabet', description: 'アルファベット (NASDAQ)' },
+  { symbol: 'MSFT', displayName: 'Microsoft', description: 'マイクロソフト (NASDAQ)' },
+  { symbol: 'AMZN', displayName: 'Amazon', description: 'アマゾン (NASDAQ)' },
+  { symbol: 'TSLA', displayName: 'Tesla', description: 'テスラ (NASDAQ)' },
+  { symbol: 'NVDA', displayName: 'NVIDIA', description: 'エヌビディア (NASDAQ)' },
+  { symbol: 'META', displayName: 'Meta', description: 'メタ (NASDAQ)' },
+  // 日本株 (東証)
+  { symbol: '7203.T', displayName: 'トヨタ自動車', description: 'Toyota (東証)' },
+  { symbol: '6758.T', displayName: 'ソニーG', description: 'Sony Group (東証)' },
+  { symbol: '9984.T', displayName: 'ソフトバンクG', description: 'SoftBank Group (東証)' },
+  { symbol: '6861.T', displayName: 'キーエンス', description: 'Keyence (東証)' },
+  { symbol: '9432.T', displayName: 'NTT', description: '日本電信電話 (東証)' },
+];
+
+
+// 株式銘柄リスト（ユーザー設定を反映）
+app.get('/api/stock/tickers', async (req, res) => {
+  const userId = getSessionUserId(req);
+
+  // 認証なしの場合はデフォルトリストを返す
+  if (!userId) {
+    return res.json(DEFAULT_STOCKS);
+  }
+
+  try {
+    const settings = await getUserSettings(userId);
+    const stockConfig = settings?.stockConfig || { hiddenStocks: [], addedStocks: [] };
+    const hiddenStocks = stockConfig.hiddenStocks || [];
+    const addedStocks = stockConfig.addedStocks || [];
+
+    // デフォルトから非表示を除外
+    const visibleDefaults = DEFAULT_STOCKS.filter(s => !hiddenStocks.includes(s.symbol));
+
+    // ユーザー追加銘柄をマージ（重複防止）
+    const visibleSymbols = new Set(visibleDefaults.map(s => s.symbol));
+    const uniqueAdded = addedStocks.filter(s => !visibleSymbols.has(s.symbol));
+
+    return res.json([...visibleDefaults, ...uniqueAdded]);
+  } catch (err) {
+    console.error('Error getting stock tickers:', err);
+    return res.json(DEFAULT_STOCKS);
+  }
+});
+
+// 株式検索（Yahoo Finance APIを使用）
+app.get('/api/stock/search', async (req, res) => {
+  const query = req.query.q;
+
+  if (!query || query.length < 1) {
+    return res.json([]);
+  }
+
+  try {
+    // Yahoo Finance Search API
+    const searchUrl = `https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=20&newsCount=0&listsCount=0&enableFuzzyQuery=false&quotesQueryId=tss_match_phrase_query`;
+
+    const response = await fetch(searchUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    if (!response.ok) {
+      console.error('Yahoo Finance search failed:', response.status);
+      return res.json([]);
+    }
+
+    const data = await response.json();
+    const quotes = data.quotes || [];
+
+    // 株式のみをフィルタリング（EQUITY型）し、必要な情報を整形
+    const stocks = quotes
+      .filter(q => q.quoteType === 'EQUITY')
+      .map(q => {
+        // 取引所の表示名を決定
+        let exchangeLabel = q.exchange || '';
+        if (q.symbol.endsWith('.T')) {
+          exchangeLabel = '東証';
+        } else if (exchangeLabel === 'NMS' || exchangeLabel === 'NGM') {
+          exchangeLabel = 'NASDAQ';
+        } else if (exchangeLabel === 'NYQ') {
+          exchangeLabel = 'NYSE';
+        }
+
+        return {
+          symbol: q.symbol,
+          displayName: q.shortname || q.longname || q.symbol,
+          description: `${q.longname || q.shortname || ''} (${exchangeLabel})`.trim(),
+        };
+      });
+
+    return res.json(stocks);
+  } catch (err) {
+    console.error('Stock search error:', err);
+    return res.json([]);
+  }
+});
+
+// ユーザーの株式設定を取得
+app.get('/api/user/stock-config', requireAuth, async (req, res) => {
+  const userId = getSessionUserId(req);
+  try {
+    const settings = await getUserSettings(userId);
+    const stockConfig = settings?.stockConfig || { hiddenStocks: [], addedStocks: [] };
+    return res.json(stockConfig);
+  } catch (err) {
+    console.error('Error getting stock config:', err);
+    return res.status(500).json({ error: 'Failed to get stock config' });
+  }
+});
+
+// 株式を追加
+app.post('/api/user/stock-config/add', requireAuth, async (req, res) => {
+  const userId = getSessionUserId(req);
+  const { symbol, displayName, description } = req.body;
+
+  console.log('[stock-config/add] userId:', userId, 'symbol:', symbol, 'displayName:', displayName);
+
+  if (!symbol) {
+    console.log('[stock-config/add] Error: Symbol is required');
+    return res.status(400).json({ error: 'Symbol is required' });
+  }
+
+  try {
+    const settings = await getUserSettings(userId) || {};
+    console.log('[stock-config/add] Current settings:', JSON.stringify(settings?.stockConfig || {}));
+    const stockConfig = settings.stockConfig || { hiddenStocks: [], addedStocks: [] };
+
+    // デフォルトリストにある場合はhiddenStocksから削除（復元）
+    const isDefault = DEFAULT_STOCKS.some(s => s.symbol === symbol);
+    if (isDefault) {
+      stockConfig.hiddenStocks = (stockConfig.hiddenStocks || []).filter(s => s !== symbol);
+    } else {
+      // 追加済みでなければ追加
+      const alreadyAdded = (stockConfig.addedStocks || []).some(s => s.symbol === symbol);
+      if (!alreadyAdded) {
+        stockConfig.addedStocks = stockConfig.addedStocks || [];
+        stockConfig.addedStocks.push({ symbol, displayName, description });
+      }
+    }
+
+    settings.stockConfig = stockConfig;
+    console.log('[stock-config/add] Saving settings:', JSON.stringify(settings.stockConfig));
+    await upsertUserSettings(userId, settings);
+    console.log('[stock-config/add] Success');
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[stock-config/add] Error:', err);
+    return res.status(500).json({ error: 'Failed to add stock', details: err.message });
+  }
+});
+
+// 株式を非表示（削除）
+app.post('/api/user/stock-config/hide', requireAuth, async (req, res) => {
+  const userId = getSessionUserId(req);
+  const { symbol } = req.body;
+
+  console.log('[stock-config/hide] userId:', userId, 'symbol:', symbol);
+
+  if (!symbol) {
+    console.log('[stock-config/hide] Error: Symbol is required');
+    return res.status(400).json({ error: 'Symbol is required' });
+  }
+
+  try {
+    const settings = await getUserSettings(userId) || {};
+    console.log('[stock-config/hide] Current settings:', JSON.stringify(settings?.stockConfig || {}));
+    const stockConfig = settings.stockConfig || { hiddenStocks: [], addedStocks: [] };
+
+    // デフォルトリストにある場合はhiddenStocksに追加
+    const isDefault = DEFAULT_STOCKS.some(s => s.symbol === symbol);
+    if (isDefault) {
+      stockConfig.hiddenStocks = stockConfig.hiddenStocks || [];
+      if (!stockConfig.hiddenStocks.includes(symbol)) {
+        stockConfig.hiddenStocks.push(symbol);
+      }
+    }
+
+    // addedStocksから削除
+    stockConfig.addedStocks = (stockConfig.addedStocks || []).filter(s => s.symbol !== symbol);
+
+    settings.stockConfig = stockConfig;
+    console.log('[stock-config/hide] Saving settings:', JSON.stringify(settings.stockConfig));
+    await upsertUserSettings(userId, settings);
+    console.log('[stock-config/hide] Success');
+
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[stock-config/hide] Error:', err);
+    return res.status(500).json({ error: 'Failed to hide stock', details: err.message });
+  }
 });
 
 // =====================

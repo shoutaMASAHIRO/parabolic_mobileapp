@@ -3,7 +3,9 @@
     "allow": [
       "Bash(flutter:*)",
       "Bash(docker exec:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(cmd /c \"cd /d C:\\\\src\\\\parabolic\\\\parabolic_app && flutter analyze\")",
+      "Bash(cmd /c \"cd C:\\\\src\\\\parabolic\\\\parabolic_app && flutter analyze 2>&1\")"
     ]
   }
 }

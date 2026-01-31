@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import 'home_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -37,13 +38,17 @@ class _RegisterScreenState extends State<RegisterScreen> {
       );
 
       if (success && mounted) {
+        // 登録成功後、自動的にログインしてホーム画面へ
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('登録が完了しました。ログインしてください。'),
+            content: Text('登録が完了しました'),
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.of(context).pop();
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+          (route) => false,
+        );
       }
     }
   }

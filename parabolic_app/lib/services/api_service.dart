@@ -47,14 +47,18 @@ class ApiService {
     }
   }
 
-  Map<String, String> _buildHeaders({bool withJson = true}) {
+  Future<Map<String, String>> _buildHeaders({bool withJson = true}) async {
     final headers = <String, String>{};
     if (withJson) {
       headers['Content-Type'] = 'application/json';
     }
     // Webの場合はブラウザがCookieを自動管理するのでヘッダー不要
-    if (!kIsWeb && _sessionCookie != null) {
-      headers['Cookie'] = _sessionCookie!;
+    if (!kIsWeb) {
+      // SharedPreferencesからCookieを読み込む
+      final cookie = await getSessionCookie();
+      if (cookie != null) {
+        headers['Cookie'] = cookie;
+      }
     }
     return headers;
   }
@@ -75,9 +79,10 @@ class ApiService {
   Future<ApiResponse> get(String endpoint) async {
     final client = _createClient();
     try {
+      final headers = await _buildHeaders(withJson: false);
       final response = await client.get(
         Uri.parse('${AppConfig.apiUrl}$endpoint'),
-        headers: _buildHeaders(withJson: false),
+        headers: headers,
       );
       _extractCookie(response);
       return ApiResponse(
@@ -99,9 +104,10 @@ class ApiService {
   Future<ApiResponse> post(String endpoint, Map<String, dynamic> data) async {
     final client = _createClient();
     try {
+      final headers = await _buildHeaders();
       final response = await client.post(
         Uri.parse('${AppConfig.apiUrl}$endpoint'),
-        headers: _buildHeaders(),
+        headers: headers,
         body: jsonEncode(data),
       );
       _extractCookie(response);
@@ -124,9 +130,10 @@ class ApiService {
   Future<ApiResponse> put(String endpoint, Map<String, dynamic> data) async {
     final client = _createClient();
     try {
+      final headers = await _buildHeaders();
       final response = await client.put(
         Uri.parse('${AppConfig.apiUrl}$endpoint'),
-        headers: _buildHeaders(),
+        headers: headers,
         body: jsonEncode(data),
       );
       _extractCookie(response);
@@ -149,9 +156,10 @@ class ApiService {
   Future<ApiResponse> delete(String endpoint) async {
     final client = _createClient();
     try {
+      final headers = await _buildHeaders(withJson: false);
       final response = await client.delete(
         Uri.parse('${AppConfig.apiUrl}$endpoint'),
-        headers: _buildHeaders(withJson: false),
+        headers: headers,
       );
       _extractCookie(response);
       return ApiResponse(

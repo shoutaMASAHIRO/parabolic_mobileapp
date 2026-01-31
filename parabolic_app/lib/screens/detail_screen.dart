@@ -8,6 +8,7 @@ import '../providers/auth_provider.dart';
 import '../services/chart_service.dart';
 import '../services/cross_detection_service.dart';
 import 'memo_screen.dart';
+import 'home_screen.dart' show MarketCategory;
 
 // チャートタイプ
 enum ChartType { line, candlestick, heikinAshi }
@@ -32,8 +33,13 @@ class IndicatorSettings {
 
 class DetailScreen extends StatefulWidget {
   final String symbol;
+  final MarketCategory category;
 
-  const DetailScreen({super.key, required this.symbol});
+  const DetailScreen({
+    super.key,
+    required this.symbol,
+    this.category = MarketCategory.crypto,
+  });
 
   @override
   State<DetailScreen> createState() => _DetailScreenState();
@@ -47,12 +53,25 @@ class _DetailScreenState extends State<DetailScreen> {
   String _interval = '1d';
   ChartType _chartType = ChartType.line;
 
-  // 自動更新タイマー（15秒間隔）
-  static const int _refreshIntervalSeconds = 15;
-  static const Duration _refreshInterval = Duration(seconds: _refreshIntervalSeconds);
-  Timer? _refreshTimer;
+  // 自動更新タイマー（60秒間隔）
+  static const int _refreshIntervalSeconds = 60;
   Timer? _countdownTimer;
   int _secondsUntilRefresh = _refreshIntervalSeconds;
+
+  // チャートのズーム・パン状態
+  double _chartZoom = 1.0;
+  double _chartPanOffsetX = 0.0;
+  double _chartPanOffsetY = 0.0;
+  static const double _minZoom = 1.0;
+  static const double _maxZoom = 8.0;
+  double? _lastScaleStart;
+  Offset? _lastFocalPoint;
+  Offset? _lastTapPosition;
+
+  // クロスヘア（タッチ位置表示）
+  Offset? _crosshairPosition;
+  int? _crosshairIndex;
+  bool _showCrosshair = false;
 
   // インジケーター設定（パラメータ付き）
   final Map<String, IndicatorSettings> _indicators = {
@@ -66,7 +85,11 @@ class _DetailScreenState extends State<DetailScreen> {
     ),
   };
 
-  final List<String> _intervals = ['1h', '4h', '1d', '1wk', '1mo'];
+  final List<String> _intervals = ['5m', '15m', '30m', '1h', '4h', '1d', '1wk', '1mo'];
+
+  // 通貨表示切替（USD/JPY）
+  bool _showJPY = false;
+  double _usdJpyRate = 155.0; // デフォルト値（APIから取得して更新）
 
   // インジケーターのゲッター
   bool get _showBB => _indicators['bb']?.enabled ?? false;
@@ -110,7 +133,7 @@ class _DetailScreenState extends State<DetailScreen> {
   void initState() {
     super.initState();
     _loadIndicatorSettingsFromServer();
-    _loadData();
+    _loadData(); // 為替レートもここで取得
     _loadCrossSettings();
     _startRefreshTimer();
   }
@@ -134,36 +157,43 @@ class _DetailScreenState extends State<DetailScreen> {
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
     _countdownTimer?.cancel();
     super.dispose();
   }
 
+  bool _isRefreshing = false;
+
   void _startRefreshTimer() {
-    _refreshTimer?.cancel();
     _countdownTimer?.cancel();
 
     // カウントダウンをリセット
     _secondsUntilRefresh = _refreshIntervalSeconds;
 
     // 1秒ごとにカウントダウンを更新
-    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) {
-        setState(() {
-          if (_secondsUntilRefresh > 0) {
-            _secondsUntilRefresh--;
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+
+      // 更新中はカウントダウンを止める
+      if (_isRefreshing) return;
+
+      // カウントダウンを減らす
+      _secondsUntilRefresh--;
+
+      // 0以下になったら更新処理を実行
+      if (_secondsUntilRefresh <= 0) {
+        _isRefreshing = true;
+        setState(() {}); // 「更新中」表示
+
+        _refreshChartData().then((_) {
+          if (mounted) {
+            setState(() {
+              _secondsUntilRefresh = _refreshIntervalSeconds;
+              _isRefreshing = false;
+            });
           }
         });
-      }
-    });
-
-    // データ更新タイマー
-    _refreshTimer = Timer.periodic(_refreshInterval, (_) {
-      if (mounted) {
-        _refreshChartData();
-        setState(() {
-          _secondsUntilRefresh = _refreshIntervalSeconds; // リセット
-        });
+      } else {
+        setState(() {}); // カウントダウン表示更新
       }
     });
   }
@@ -232,14 +262,21 @@ class _DetailScreenState extends State<DetailScreen> {
     });
 
     try {
-      final candles = await _chartService.getChartData(
-        widget.symbol,
-        interval: _interval,
-      );
+      // チャートデータと為替レートを並行取得
+      final results = await Future.wait([
+        _chartService.getChartData(widget.symbol, interval: _interval),
+        _chartService.getUsdJpyRate(),
+      ]);
+
+      final candles = results[0] as List<Candle>;
+      final rate = results[1] as double?;
 
       if (mounted) {
         setState(() {
           _candles = candles;
+          if (rate != null) {
+            _usdJpyRate = rate;
+          }
           _isLoading = false;
         });
 
@@ -258,24 +295,42 @@ class _DetailScreenState extends State<DetailScreen> {
 
   // 自動更新（ローディング表示なし、スムーズに更新）
   Future<void> _refreshChartData() async {
+    final startTime = DateTime.now();
+    debugPrint('[REFRESH] 開始: $startTime');
+
     try {
-      final candles = await _chartService.getChartData(
-        widget.symbol,
-        interval: _interval,
-      );
+      // チャートデータと為替レートを並行取得
+      final results = await Future.wait([
+        _chartService.getChartData(widget.symbol, interval: _interval),
+        _chartService.getUsdJpyRate(),
+      ]);
+
+      final candles = results[0] as List<Candle>;
+      final rate = results[1] as double?;
+
+      final fetchTime = DateTime.now().difference(startTime).inMilliseconds;
+      debugPrint('[REFRESH] データ取得完了: ${fetchTime}ms, ${candles.length}本, レート: $rate');
 
       if (mounted && candles.isNotEmpty) {
+        final lastCandle = candles.last;
+        debugPrint('[REFRESH] 最新価格: ${lastCandle.close}');
+
         setState(() {
           _candles = candles;
+          if (rate != null) {
+            _usdJpyRate = rate;
+          }
         });
 
         // サーバーからクロス履歴を更新
         _refreshCrossHistory();
       }
     } catch (e) {
-      // 自動更新時はエラーを静かに無視（次回の更新で再試行）
-      debugPrint('Auto-refresh failed: $e');
+      debugPrint('[REFRESH] エラー: $e');
     }
+
+    final totalTime = DateTime.now().difference(startTime).inMilliseconds;
+    debugPrint('[REFRESH] 完了: ${totalTime}ms');
   }
 
   // サーバーからクロス履歴を再取得
@@ -311,48 +366,82 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+  Color _getCategoryColor() {
+    switch (widget.category) {
+      case MarketCategory.crypto:
+        return Colors.orange;
+      case MarketCategory.forex:
+        return Colors.green;
+      case MarketCategory.stock:
+        return Colors.blue;
+    }
+  }
+
+  // タイマーウィジェットを構築
+  Widget _buildTimerWidget() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: _isRefreshing
+            ? Colors.blue
+            : _secondsUntilRefresh <= 10
+                ? Colors.orange
+                : Colors.green,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _isRefreshing
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(
+                  Icons.timer,
+                  size: 16,
+                  color: Colors.white,
+                ),
+          const SizedBox(width: 4),
+          Text(
+            _isRefreshing ? '更新中' : '${_secondsUntilRefresh}s',
+            style: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final displayName = widget.symbol.replaceAll('-USD', '');
+    // カテゴリに応じた表示名を生成
+    String displayName;
+    switch (widget.category) {
+      case MarketCategory.crypto:
+        displayName = widget.symbol.replaceAll('-USD', '');
+        break;
+      case MarketCategory.forex:
+        displayName = widget.symbol
+            .replaceAll('=X', '')
+            .replaceAllMapped(RegExp(r'([A-Z]{3})([A-Z]{3})'), (m) => '${m[1]}/${m[2]}');
+        break;
+      case MarketCategory.stock:
+        displayName = widget.symbol;
+        break;
+    }
 
     return Scaffold(
       appBar: AppBar(
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(displayName),
-            const SizedBox(width: 12),
-            // カウントダウン表示
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: _secondsUntilRefresh <= 3
-                    ? Colors.orange.withAlpha(50)
-                    : Colors.blue.withAlpha(30),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.refresh,
-                    size: 14,
-                    color: _secondsUntilRefresh <= 3 ? Colors.orange : Colors.blue,
-                  ),
-                  const SizedBox(width: 4),
-                  Text(
-                    '${_secondsUntilRefresh}s',
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      color: _secondsUntilRefresh <= 3 ? Colors.orange : Colors.blue,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
+        titleSpacing: 0,
+        title: Text(displayName),
         actions: [
           // インジケーター設定ボタン
           Stack(
@@ -479,6 +568,12 @@ class _DetailScreenState extends State<DetailScreen> {
 
   String _getIntervalLabel(String interval) {
     switch (interval) {
+      case '5m':
+        return '5分';
+      case '15m':
+        return '15分';
+      case '30m':
+        return '30分';
       case '1h':
         return '1時間';
       case '4h':
@@ -530,9 +625,17 @@ class _DetailScreenState extends State<DetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // 銘柄情報とタイマー
+              _buildSymbolHeader(),
+              const SizedBox(height: 12),
               _buildPriceHeader(),
               const SizedBox(height: 16),
               _buildChartTypeSelector(),
+              // 暗号通貨・米国株の場合は通貨切替を表示（為替・日本株は不要）
+              if (_shouldShowCurrencyToggle()) ...[
+                const SizedBox(height: 8),
+                _buildCurrencyToggle(),
+              ],
               if (_activeIndicatorCount > 0) ...[
                 const SizedBox(height: 8),
                 _buildActiveIndicatorChips(),
@@ -545,6 +648,68 @@ class _DetailScreenState extends State<DetailScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildSymbolHeader() {
+    // カテゴリに応じた表示名を生成
+    String displayName;
+    switch (widget.category) {
+      case MarketCategory.crypto:
+        displayName = widget.symbol.replaceAll('-USD', '');
+        break;
+      case MarketCategory.forex:
+        // USDJPY=X → USD/JPY
+        displayName = widget.symbol
+            .replaceAll('=X', '')
+            .replaceAllMapped(RegExp(r'([A-Z]{3})([A-Z]{3})'), (m) => '${m[1]}/${m[2]}');
+        break;
+      case MarketCategory.stock:
+        displayName = widget.symbol;
+        break;
+    }
+
+    return Row(
+      children: [
+        // カテゴリアイコン
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: _getCategoryColor().withAlpha(30),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(
+            widget.category.icon,
+            size: 28,
+            color: _getCategoryColor(),
+          ),
+        ),
+        const SizedBox(width: 12),
+        // 銘柄情報
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                displayName,
+                style: const TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                '${widget.category.label} • ${widget.symbol}',
+                style: TextStyle(
+                  fontSize: 13,
+                  color: Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+        // タイマー
+        _buildTimerWidget(),
+      ],
     );
   }
 
@@ -576,6 +741,61 @@ class _DetailScreenState extends State<DetailScreen> {
         },
         style: ButtonStyle(
           visualDensity: VisualDensity.compact,
+        ),
+      ),
+    );
+  }
+
+  // 通貨切替ボタン（USD/JPY）
+  Widget _buildCurrencyToggle() {
+    return Center(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _buildCurrencyButton('USD', !_showJPY),
+                _buildCurrencyButton('JPY', _showJPY),
+              ],
+            ),
+          ),
+          if (_showJPY) ...[
+            const SizedBox(width: 8),
+            Text(
+              '(1\$ = ¥${_usdJpyRate.toStringAsFixed(2)})',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCurrencyButton(String currency, bool isSelected) {
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _showJPY = currency == 'JPY';
+        });
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? Colors.blue : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          currency,
+          style: TextStyle(
+            color: isSelected ? Colors.white : Colors.grey.shade700,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+          ),
         ),
       ),
     );
@@ -733,11 +953,25 @@ class _DetailScreenState extends State<DetailScreen> {
     final changePercent = (priceChange / previousCandle.close) * 100;
     final isPositive = priceChange >= 0;
 
+    // 価格変動の表示文字列を生成
+    String priceChangeStr;
+    if (widget.category == MarketCategory.forex) {
+      // 為替: 通貨変換なし、クォート通貨で表示
+      final quoteCurrency = _getQuoteCurrencySymbol();
+      priceChangeStr = '${isPositive ? '+' : ''}$quoteCurrency${_formatPrice(priceChange.abs())} (${changePercent.toStringAsFixed(2)}%)';
+    } else if (widget.category == MarketCategory.stock && _isJapaneseStock()) {
+      // 日本株: 通貨変換なし、円で表示
+      priceChangeStr = '${isPositive ? '+' : ''}¥${_formatPrice(priceChange.abs())} (${changePercent.toStringAsFixed(2)}%)';
+    } else {
+      // 暗号通貨・米国株: 通貨変換あり
+      priceChangeStr = '${isPositive ? '+' : ''}$_currencySymbol${_formatPrice(_convertPrice(priceChange.abs()))} (${changePercent.toStringAsFixed(2)}%)';
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          '\$${_formatPrice(latestCandle.close)}',
+          _formatPriceWithCurrency(latestCandle.close),
           style: const TextStyle(
             fontSize: 36,
             fontWeight: FontWeight.bold,
@@ -753,7 +987,7 @@ class _DetailScreenState extends State<DetailScreen> {
             ),
             const SizedBox(width: 4),
             Text(
-              '${isPositive ? '+' : ''}\$${_formatPrice(priceChange.abs())} (${changePercent.toStringAsFixed(2)}%)',
+              priceChangeStr,
               style: TextStyle(
                 fontSize: 16,
                 color: isPositive ? Colors.green : Colors.red,
@@ -794,7 +1028,6 @@ class _DetailScreenState extends State<DetailScreen> {
 
     final minY = candles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
     final maxY = candles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
-    final padding = (maxY - minY) * 0.1;
 
     final isPositive = candles.last.close >= candles.first.close;
     final chartColor = isPositive ? Colors.green : Colors.red;
@@ -833,46 +1066,315 @@ class _DetailScreenState extends State<DetailScreen> {
       lineBars.addAll(_createEMALines(closePrices, candles.length));
     }
 
-    return SizedBox(
-      height: 300,
-      child: LineChart(
-        LineChartData(
-          gridData: FlGridData(
-            show: true,
-            drawVerticalLine: false,
-            horizontalInterval: (maxY - minY) / 5,
-            getDrawingHorizontalLine: (value) {
-              return FlLine(
-                color: Colors.grey.withAlpha(50),
-                strokeWidth: 1,
-              );
-            },
-          ),
-          titlesData: _buildTitlesData(candles, minY, maxY),
-          borderData: FlBorderData(show: false),
-          minX: 0,
-          maxX: (candles.length - 1).toDouble(),
-          minY: minY - padding,
-          maxY: maxY + padding,
-          lineBarsData: lineBars,
-          lineTouchData: LineTouchData(
-            touchTooltipData: LineTouchTooltipData(
-              getTooltipItems: (touchedSpots) {
-                return touchedSpots.map((spot) {
-                  final index = spot.x.toInt();
-                  if (index < 0 || index >= candles.length) return null;
-                  // メインラインのみツールチップ表示
-                  if (spot.barIndex != 0) return null;
-                  final candle = candles[index];
-                  return LineTooltipItem(
-                    '${DateFormat('yyyy/MM/dd').format(candle.date)}\n\$${_formatPrice(candle.close)}',
-                    const TextStyle(color: Colors.white),
-                  );
-                }).toList();
-              },
+    // ズーム・パンに基づいて表示範囲を計算
+    final totalDataPoints = candles.length.toDouble();
+    final visibleDataPoints = totalDataPoints / _chartZoom;
+    final maxPanOffset = totalDataPoints - visibleDataPoints;
+    final panOffset = (_chartPanOffsetX * maxPanOffset).clamp(0.0, maxPanOffset);
+    final visibleMinX = panOffset;
+    final visibleMaxX = panOffset + visibleDataPoints - 1;
+
+    // 表示範囲内のデータでY軸の範囲を再計算
+    final visibleStartIdx = visibleMinX.floor().clamp(0, candles.length - 1);
+    final visibleEndIdx = visibleMaxX.ceil().clamp(0, candles.length - 1);
+    final visibleCandles = candles.sublist(visibleStartIdx, visibleEndIdx + 1);
+
+    double visibleMinY = minY;
+    double visibleMaxY = maxY;
+    if (visibleCandles.isNotEmpty) {
+      visibleMinY = visibleCandles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
+      visibleMaxY = visibleCandles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
+    }
+    final visiblePadding = (visibleMaxY - visibleMinY) * 0.1;
+
+    // 縦パンオフセットを適用
+    final yRange = visibleMaxY - visibleMinY + visiblePadding * 2;
+    final yPanAmount = yRange * _chartPanOffsetY * 0.5;
+    final adjustedMinY = visibleMinY - visiblePadding + yPanAmount;
+    final adjustedMaxY = visibleMaxY + visiblePadding + yPanAmount;
+
+    // X軸ラベル間隔を計算（重複防止）
+    final xLabelInterval = _calculateXLabelInterval(visibleCandles.length);
+
+    return Column(
+      children: [
+        // ズームコントロール（コンパクト）
+        _buildCompactZoomControls(),
+        // チャート本体（軸ラベル付き）
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Y軸ラベル（左側）
+            SizedBox(
+              width: 55,
+              height: 300,
+              child: _buildYAxisLabels(adjustedMinY, adjustedMaxY),
             ),
+            // メインチャート
+            Expanded(
+              child: Column(
+                children: [
+                  _buildInteractiveChartWrapper(
+                    chartHeight: 300,
+                    visibleCandles: visibleCandles,
+                    visibleStartIdx: visibleStartIdx,
+                    child: LineChart(
+                        LineChartData(
+                          gridData: FlGridData(
+                            show: true,
+                            drawVerticalLine: true,
+                            horizontalInterval: (adjustedMaxY - adjustedMinY) / 5,
+                            verticalInterval: xLabelInterval.toDouble(),
+                            getDrawingHorizontalLine: (value) {
+                              return FlLine(
+                                color: Colors.grey.shade800,
+                                strokeWidth: 0.5,
+                              );
+                            },
+                            getDrawingVerticalLine: (value) {
+                              return FlLine(
+                                color: Colors.grey.shade800,
+                                strokeWidth: 0.5,
+                              );
+                            },
+                          ),
+                          titlesData: const FlTitlesData(show: false),
+                          borderData: FlBorderData(show: false),
+                          minX: visibleMinX,
+                          maxX: visibleMaxX,
+                          minY: adjustedMinY,
+                          maxY: adjustedMaxY,
+                          lineBarsData: lineBars,
+                          clipData: const FlClipData.all(),
+                          lineTouchData: LineTouchData(
+                            touchTooltipData: LineTouchTooltipData(
+                              getTooltipItems: (touchedSpots) {
+                                return touchedSpots.map((spot) {
+                                  final index = spot.x.toInt();
+                                  if (index < 0 || index >= candles.length) return null;
+                                  if (spot.barIndex != 0) return null;
+                                  final candle = candles[index];
+                                  return LineTooltipItem(
+                                    '${DateFormat('yyyy/MM/dd').format(candle.date)}\n${_formatPriceWithCurrency(candle.close)}',
+                                    const TextStyle(color: Colors.white),
+                                  );
+                                }).toList();
+                              },
+                            ),
+                          ),
+                        ),
+                    ),
+                  ),
+                  // X軸ラベル（下側）
+                  SizedBox(
+                    height: 30,
+                    child: _buildXAxisLabels(visibleCandles, xLabelInterval),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        // クロスヘア情報表示
+        if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length)
+          _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
+      ],
+    );
+  }
+
+  // インタラクティブチャートラッパー
+  Widget _buildInteractiveChartWrapper({
+    required double chartHeight,
+    required List<Candle> visibleCandles,
+    required int visibleStartIdx,
+    required Widget child,
+  }) {
+    return GestureDetector(
+      onScaleStart: (details) {
+        _lastScaleStart = _chartZoom;
+        _lastFocalPoint = details.focalPoint;
+      },
+      onScaleUpdate: (details) {
+        setState(() {
+          // ピンチズーム
+          if (_lastScaleStart != null && details.scale != 1.0) {
+            final newZoom = (_lastScaleStart! * details.scale).clamp(_minZoom, _maxZoom);
+            _chartZoom = newZoom;
+          }
+          // パン（スムーズ）
+          if (details.scale == 1.0) {
+            final sensitivity = 1.5 / _chartZoom; // ズーム時は感度を上げる
+            final deltaX = details.focalPointDelta.dx / 150 * sensitivity;
+            final deltaY = details.focalPointDelta.dy / 120 * sensitivity;
+            _chartPanOffsetX = (_chartPanOffsetX - deltaX).clamp(0.0, (1.0 - (1.0 / _chartZoom)).clamp(0.0, 1.0));
+            _chartPanOffsetY = (_chartPanOffsetY + deltaY).clamp(-1.5, 1.5);
+          }
+          _lastFocalPoint = details.focalPoint;
+        });
+      },
+      onScaleEnd: (details) {
+        _lastScaleStart = null;
+        _lastFocalPoint = null;
+      },
+      // ダブルタップでズーム
+      onDoubleTapDown: (details) {
+        _lastTapPosition = details.localPosition;
+      },
+      onDoubleTap: () {
+        setState(() {
+          if (_chartZoom < 2.0) {
+            _chartZoom = 3.0;
+          } else {
+            _chartZoom = 1.0;
+            _chartPanOffsetX = 0.0;
+            _chartPanOffsetY = 0.0;
+          }
+        });
+      },
+      // ロングプレスでクロスヘア表示
+      onLongPressStart: (details) {
+        _updateCrosshair(details.localPosition, visibleCandles, chartHeight);
+      },
+      onLongPressMoveUpdate: (details) {
+        _updateCrosshair(details.localPosition, visibleCandles, chartHeight);
+      },
+      onLongPressEnd: (details) {
+        setState(() {
+          _showCrosshair = false;
+          _crosshairPosition = null;
+          _crosshairIndex = null;
+        });
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.black,
+          ),
+          child: Stack(
+            children: [
+              SizedBox(height: chartHeight, child: child),
+              // クロスヘアオーバーレイ
+              if (_showCrosshair && _crosshairPosition != null)
+                Positioned.fill(
+                  child: CustomPaint(
+                    painter: CrosshairPainter(
+                      position: _crosshairPosition!,
+                      color: Colors.white54,
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
+      ),
+    );
+  }
+
+  void _updateCrosshair(Offset position, List<Candle> candles, double chartHeight) {
+    if (candles.isEmpty) return;
+    // 簡易的なインデックス計算（チャート幅に基づく）
+    final chartWidth = MediaQuery.of(context).size.width - 32; // padding分を引く
+    final index = ((position.dx / chartWidth) * candles.length).floor().clamp(0, candles.length - 1);
+
+    setState(() {
+      _showCrosshair = true;
+      _crosshairPosition = position;
+      _crosshairIndex = index;
+    });
+  }
+
+  // クロスヘア情報表示
+  Widget _buildCrosshairInfo(Candle candle) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.black87,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _buildInfoItem('日付', DateFormat('MM/dd').format(candle.date)),
+          _buildInfoItem('始値', _formatPriceWithCurrency(candle.open)),
+          _buildInfoItem('高値', _formatPriceWithCurrency(candle.high)),
+          _buildInfoItem('安値', _formatPriceWithCurrency(candle.low)),
+          _buildInfoItem('終値', _formatPriceWithCurrency(candle.close)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoItem(String label, String value) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 10)),
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+      ],
+    );
+  }
+
+  // コンパクトなズームコントロール
+  Widget _buildCompactZoomControls() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          // ズームレベル表示
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade200,
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              '${(_chartZoom * 100).toInt()}%',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.bold),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // ズームスライダー
+          Expanded(
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
+                activeTrackColor: Theme.of(context).primaryColor,
+                inactiveTrackColor: Colors.grey.shade300,
+              ),
+              child: Slider(
+                value: _chartZoom,
+                min: _minZoom,
+                max: _maxZoom,
+                onChanged: (value) => setState(() {
+                  _chartZoom = value;
+                  _chartPanOffsetX = _chartPanOffsetX.clamp(0.0, (1.0 - (1.0 / _chartZoom)).clamp(0.0, 1.0));
+                }),
+              ),
+            ),
+          ),
+          // リセットボタン
+          IconButton(
+            icon: Icon(Icons.refresh, size: 20, color: Colors.grey.shade600),
+            onPressed: () => setState(() {
+              _chartZoom = 1.0;
+              _chartPanOffsetX = 0.0;
+              _chartPanOffsetY = 0.0;
+            }),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            tooltip: 'リセット',
+          ),
+          const SizedBox(width: 8),
+          // 操作ヒント
+          Tooltip(
+            message: 'ピンチ: ズーム\nドラッグ: スクロール\nダブルタップ: ズーム切替\n長押し: 詳細表示',
+            child: Icon(Icons.help_outline, size: 18, color: Colors.grey.shade400),
+          ),
+        ],
       ),
     );
   }
@@ -880,16 +1382,12 @@ class _DetailScreenState extends State<DetailScreen> {
   List<LineChartBarData> _createBBLines(BollingerBandsResult bb, int length) {
     final lines = <LineChartBarData>[];
 
-    // 0σ（SMA）- 青
-    lines.add(_createIndicatorLine(bb.middle, length, Colors.blue, 1.5));
-    // +1σ - 水色
-    lines.add(_createIndicatorLine(bb.upper1, length, Colors.lightBlue, 1.0));
-    // -1σ - 水色
-    lines.add(_createIndicatorLine(bb.lower1, length, Colors.lightBlue, 1.0));
-    // +2σ - 青紫
-    lines.add(_createIndicatorLine(bb.upper2, length, Colors.indigo.shade300, 1.0));
-    // -2σ - 青紫
-    lines.add(_createIndicatorLine(bb.lower2, length, Colors.indigo.shade300, 1.0));
+    // BB: グレー系で統一（ローソク足と区別しやすく）
+    lines.add(_createIndicatorLine(bb.middle, length, Colors.white70, 1.5));
+    lines.add(_createIndicatorLine(bb.upper1, length, Colors.grey.shade500, 1.0));
+    lines.add(_createIndicatorLine(bb.lower1, length, Colors.grey.shade500, 1.0));
+    lines.add(_createIndicatorLine(bb.upper2, length, Colors.grey.shade600, 1.0));
+    lines.add(_createIndicatorLine(bb.lower2, length, Colors.grey.shade600, 1.0));
 
     return lines;
   }
@@ -897,17 +1395,15 @@ class _DetailScreenState extends State<DetailScreen> {
   List<LineChartBarData> _createEMALines(List<double> prices, int length) {
     final lines = <LineChartBarData>[];
 
-    // EMA 1 - 黄色
+    // EMA: オレンジ系で統一
     final ema1 = TechnicalIndicators.calculateEMA(prices, _emaPeriod1);
-    lines.add(_createIndicatorLine(ema1, length, Colors.yellow.shade600, 1.5));
+    lines.add(_createIndicatorLine(ema1, length, Colors.orange.shade300, 1.5));
 
-    // EMA 2 - オレンジ
     final ema2 = TechnicalIndicators.calculateEMA(prices, _emaPeriod2);
     lines.add(_createIndicatorLine(ema2, length, Colors.orange, 1.5));
 
-    // EMA 3 - 赤オレンジ
     final ema3 = TechnicalIndicators.calculateEMA(prices, _emaPeriod3);
-    lines.add(_createIndicatorLine(ema3, length, Colors.deepOrange, 1.5));
+    lines.add(_createIndicatorLine(ema3, length, Colors.orange.shade700, 1.5));
 
     return lines;
   }
@@ -937,127 +1433,202 @@ class _DetailScreenState extends State<DetailScreen> {
 
     final minY = candles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
     final maxY = candles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
-    final padding = (maxY - minY) * 0.1;
 
-    // インジケーターを計算
-    BollingerBandsResult? bb;
-    List<List<double?>>? emaLines;
+    // ズーム・パンに基づいて表示範囲を計算
+    final totalDataPoints = candles.length.toDouble();
+    final visibleDataPoints = (totalDataPoints / _chartZoom).round();
+    final maxPanOffset = candles.length - visibleDataPoints;
+    final panOffset = (_chartPanOffsetX * maxPanOffset).round().clamp(0, maxPanOffset);
+    final visibleStartIdx = panOffset;
+    final visibleEndIdx = (panOffset + visibleDataPoints).clamp(0, candles.length);
+    final visibleCandles = candles.sublist(visibleStartIdx, visibleEndIdx);
+
+    // 表示範囲内のY軸範囲を計算
+    double visibleMinY = minY;
+    double visibleMaxY = maxY;
+    if (visibleCandles.isNotEmpty) {
+      visibleMinY = visibleCandles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
+      visibleMaxY = visibleCandles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
+    }
+    final visiblePadding = (visibleMaxY - visibleMinY) * 0.1;
+
+    // 縦パンオフセットを適用
+    final yRange = visibleMaxY - visibleMinY + visiblePadding * 2;
+    final yPanAmount = yRange * _chartPanOffsetY * 0.5;
+    final adjustedMinY = visibleMinY - visiblePadding + yPanAmount;
+    final adjustedMaxY = visibleMaxY + visiblePadding + yPanAmount;
+
+    // インジケーターを計算（表示範囲用にスライス）
+    BollingerBandsResult? visibleBB;
+    List<List<double?>>? visibleEmaLines;
 
     if (_showBB) {
-      bb = TechnicalIndicators.calculateBollingerBands(
+      final fullBB = TechnicalIndicators.calculateBollingerBands(
         closePrices,
         period: _bbPeriod,
         stdDev1: _bbStdDev1,
         stdDev2: _bbStdDev2,
       );
+      // 表示範囲にスライス
+      visibleBB = BollingerBandsResult(
+        middle: fullBB.middle.sublist(visibleStartIdx, visibleEndIdx),
+        upper1: fullBB.upper1.sublist(visibleStartIdx, visibleEndIdx),
+        lower1: fullBB.lower1.sublist(visibleStartIdx, visibleEndIdx),
+        upper2: fullBB.upper2.sublist(visibleStartIdx, visibleEndIdx),
+        lower2: fullBB.lower2.sublist(visibleStartIdx, visibleEndIdx),
+      );
     }
     if (_showEMA) {
-      emaLines = [
-        TechnicalIndicators.calculateEMA(closePrices, _emaPeriod1),
-        TechnicalIndicators.calculateEMA(closePrices, _emaPeriod2),
-        TechnicalIndicators.calculateEMA(closePrices, _emaPeriod3),
+      final fullEma1 = TechnicalIndicators.calculateEMA(closePrices, _emaPeriod1);
+      final fullEma2 = TechnicalIndicators.calculateEMA(closePrices, _emaPeriod2);
+      final fullEma3 = TechnicalIndicators.calculateEMA(closePrices, _emaPeriod3);
+      // 表示範囲にスライス
+      visibleEmaLines = [
+        fullEma1.sublist(visibleStartIdx, visibleEndIdx),
+        fullEma2.sublist(visibleStartIdx, visibleEndIdx),
+        fullEma3.sublist(visibleStartIdx, visibleEndIdx),
       ];
     }
 
-    return SizedBox(
-      height: 300,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          return GestureDetector(
-            onTapDown: (details) {
-              _showCandleTooltip(context, details, candles, constraints.maxWidth);
-            },
-            child: CustomPaint(
-              size: Size(constraints.maxWidth, 300),
-              painter: CandlestickPainter(
-                candles: candles,
-                minY: minY - padding,
-                maxY: maxY + padding,
-                bb: bb,
-                emaLines: emaLines,
+    // X軸ラベル間隔を計算（重複防止）
+    final xLabelInterval = _calculateXLabelInterval(visibleCandles.length);
+
+    return Column(
+      children: [
+        // ズームコントロール（コンパクト）
+        _buildCompactZoomControls(),
+        // チャート本体（軸ラベル付き）
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Y軸ラベル（左側）
+            SizedBox(
+              width: 55,
+              height: 300,
+              child: _buildYAxisLabels(adjustedMinY, adjustedMaxY),
+            ),
+            // メインチャート
+            Expanded(
+              child: Column(
+                children: [
+                  _buildInteractiveChartWrapper(
+                    chartHeight: 300,
+                    visibleCandles: visibleCandles,
+                    visibleStartIdx: visibleStartIdx,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        return CustomPaint(
+                          size: Size(constraints.maxWidth, 300),
+                          painter: CandlestickPainter(
+                            candles: visibleCandles,
+                            minY: adjustedMinY,
+                            maxY: adjustedMaxY,
+                            bb: visibleBB,
+                            emaLines: visibleEmaLines,
+                            startIndex: visibleStartIdx,
+                            totalLength: candles.length,
+                            xLabelInterval: xLabelInterval,
+                            interval: _interval,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  // X軸ラベル（下側）
+                  SizedBox(
+                    height: 30,
+                    child: _buildXAxisLabels(visibleCandles, xLabelInterval),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        // クロスヘア情報表示
+        if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length)
+          _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
+      ],
+    );
+  }
+
+  // X軸ラベル間隔を計算（重複防止）
+  int _calculateXLabelInterval(int dataPoints) {
+    if (dataPoints <= 5) return 1;
+    if (dataPoints <= 15) return 3;
+    if (dataPoints <= 30) return 5;
+    if (dataPoints <= 60) return 10;
+    if (dataPoints <= 120) return 20;
+    return (dataPoints / 5).ceil();
+  }
+
+  // Y軸ラベル
+  Widget _buildYAxisLabels(double minY, double maxY) {
+    final range = maxY - minY;
+    final labels = <Widget>[];
+    for (int i = 0; i <= 5; i++) {
+      final value = maxY - (range * i / 5);
+      labels.add(
+        Expanded(
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Text(
+                _formatPrice(value),
+                style: const TextStyle(
+                  fontSize: 9,
+                  color: Colors.black,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+    return Column(children: labels);
+  }
+
+  // X軸ラベル
+  Widget _buildXAxisLabels(List<Candle> candles, int interval) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final labels = <Widget>[];
+        final candleWidth = constraints.maxWidth / candles.length;
+        final format = ['5m', '15m', '30m', '1h', '4h'].contains(_interval)
+            ? DateFormat('HH:mm')
+            : DateFormat('MM/dd');
+
+        for (int i = 0; i < candles.length; i += interval) {
+          // ラベル位置を計算（左端・右端で切れないように調整）
+          double leftPos = i * candleWidth + candleWidth / 2 - 20;
+          // 左端で切れないように
+          if (leftPos < 0) leftPos = 0;
+          // 右端で切れないように
+          if (leftPos > constraints.maxWidth - 40) {
+            leftPos = constraints.maxWidth - 40;
+          }
+
+          labels.add(
+            Positioned(
+              left: leftPos,
+              child: SizedBox(
+                width: 40,
+                child: Text(
+                  format.format(candles[i].date),
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 9,
+                    color: Colors.black,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ),
           );
-        },
-      ),
-    );
-  }
-
-  void _showCandleTooltip(BuildContext context, TapDownDetails details, List<Candle> candles, double width) {
-    final candleWidth = width / candles.length;
-    final index = (details.localPosition.dx / candleWidth).floor();
-
-    if (index < 0 || index >= candles.length) return;
-
-    final candle = candles[index];
-    final isHeikinAshi = _chartType == ChartType.heikinAshi;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          '${DateFormat('yyyy/MM/dd').format(candle.date)} | '
-          '始: \$${_formatPrice(candle.open)} '
-          '高: \$${_formatPrice(candle.high)} '
-          '安: \$${_formatPrice(candle.low)} '
-          '終: \$${_formatPrice(candle.close)}'
-          '${isHeikinAshi ? ' (平均足)' : ''}',
-        ),
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
-  }
-
-  FlTitlesData _buildTitlesData(List<Candle> candles, double minY, double maxY) {
-    // 縦軸の間隔を計算（5分割）
-    final priceRange = maxY - minY;
-    final yInterval = priceRange / 5;
-
-    return FlTitlesData(
-      show: true,
-      rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-      topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-      bottomTitles: AxisTitles(
-        sideTitles: SideTitles(
-          showTitles: true,
-          reservedSize: 30,
-          interval: (candles.length / 5).ceilToDouble(),
-          getTitlesWidget: (value, meta) {
-            final index = value.toInt();
-            if (index < 0 || index >= candles.length) {
-              return const SizedBox.shrink();
-            }
-            final date = candles[index].date;
-            final format = _interval == '1h' || _interval == '4h'
-                ? DateFormat('MM/dd HH:mm')
-                : DateFormat('MM/dd');
-            return Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                format.format(date),
-                style: const TextStyle(fontSize: 10, color: Colors.grey),
-              ),
-            );
-          },
-        ),
-      ),
-      leftTitles: AxisTitles(
-        sideTitles: SideTitles(
-          showTitles: true,
-          reservedSize: 60,
-          interval: yInterval,
-          getTitlesWidget: (value, meta) {
-            // 最小値と最大値の境界は表示しない（重なり防止）
-            if (value == meta.min || value == meta.max) {
-              return const SizedBox.shrink();
-            }
-            return Text(
-              _formatPrice(value),
-              style: const TextStyle(fontSize: 10, color: Colors.grey),
-            );
-          },
-        ),
-      ),
+        }
+        return Stack(children: labels);
+      },
     );
   }
 
@@ -1078,10 +1649,10 @@ class _DetailScreenState extends State<DetailScreen> {
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
-            _buildStatRow('始値', '\$${_formatPrice(open)}'),
-            _buildStatRow('終値', '\$${_formatPrice(close)}'),
-            _buildStatRow('高値', '\$${_formatPrice(high)}'),
-            _buildStatRow('安値', '\$${_formatPrice(low)}'),
+            _buildStatRow('始値', _formatPriceWithCurrency(open)),
+            _buildStatRow('終値', _formatPriceWithCurrency(close)),
+            _buildStatRow('高値', _formatPriceWithCurrency(high)),
+            _buildStatRow('安値', _formatPriceWithCurrency(low)),
             _buildStatRow('期間', '${_candles.length}本'),
           ],
         ),
@@ -1095,11 +1666,83 @@ class _DetailScreenState extends State<DetailScreen> {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(color: Colors.grey)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.black,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.black,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  // 通貨シンボルを取得
+  String get _currencySymbol => _showJPY ? '¥' : '\$';
+
+  // 価格を選択した通貨に変換
+  double _convertPrice(double priceUSD) {
+    return _showJPY ? priceUSD * _usdJpyRate : priceUSD;
+  }
+
+  // 通貨切替を表示するかどうか
+  bool _shouldShowCurrencyToggle() {
+    // 暗号通貨: 常に表示
+    if (widget.category == MarketCategory.crypto) return true;
+    // 為替: 表示しない
+    if (widget.category == MarketCategory.forex) return false;
+    // 株式: 日本株以外（米国株）は表示
+    if (widget.category == MarketCategory.stock) {
+      return !_isJapaneseStock();
+    }
+    return false;
+  }
+
+  // 日本株かどうか判定
+  bool _isJapaneseStock() {
+    return widget.symbol.endsWith('.T');
+  }
+
+  // 為替ペアまたは株式の通貨シンボルを取得
+  String _getQuoteCurrencySymbol() {
+    // 為替の場合
+    if (widget.category == MarketCategory.forex) {
+      final symbol = widget.symbol.replaceAll('=X', '');
+      if (symbol.endsWith('JPY')) return '¥';
+      if (symbol.endsWith('USD')) return '\$';
+      if (symbol.endsWith('EUR')) return '€';
+      if (symbol.endsWith('GBP')) return '£';
+    }
+    // 日本株の場合
+    if (widget.category == MarketCategory.stock && _isJapaneseStock()) {
+      return '¥';
+    }
+    // その他（米国株、暗号通貨）
+    return '\$';
+  }
+
+  // 価格をフォーマット（通貨変換込み）
+  String _formatPriceWithCurrency(double price) {
+    // 為替の場合は通貨変換せず、クォート通貨で表示
+    if (widget.category == MarketCategory.forex) {
+      final quoteCurrency = _getQuoteCurrencySymbol();
+      return '$quoteCurrency${_formatPrice(price)}';
+    }
+    // 日本株の場合は通貨変換せず、円で表示
+    if (widget.category == MarketCategory.stock && _isJapaneseStock()) {
+      return '¥${_formatPrice(price)}';
+    }
+    // 暗号通貨・米国株の場合は通貨変換
+    final convertedPrice = _convertPrice(price);
+    return '$_currencySymbol${_formatPrice(convertedPrice)}';
   }
 
   String _formatPrice(double price) {
@@ -1113,6 +1756,61 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 }
 
+// クロスヘアを描画するCustomPainter
+class CrosshairPainter extends CustomPainter {
+  final Offset position;
+  final Color color;
+
+  CrosshairPainter({required this.position, required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+
+    final dashPaint = Paint()
+      ..color = color.withAlpha(150)
+      ..strokeWidth = 1;
+
+    // 縦線（点線）
+    double y = 0;
+    while (y < size.height) {
+      canvas.drawLine(
+        Offset(position.dx, y),
+        Offset(position.dx, y + 4),
+        dashPaint,
+      );
+      y += 8;
+    }
+
+    // 横線（点線）
+    double x = 0;
+    while (x < size.width) {
+      canvas.drawLine(
+        Offset(x, position.dy),
+        Offset(x + 4, position.dy),
+        dashPaint,
+      );
+      x += 8;
+    }
+
+    // 交点の円
+    canvas.drawCircle(position, 6, paint);
+    canvas.drawCircle(
+      position,
+      3,
+      Paint()..color = color,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CrosshairPainter oldDelegate) {
+    return position != oldDelegate.position;
+  }
+}
+
 // ローソク足チャートを描画するCustomPainter
 class CandlestickPainter extends CustomPainter {
   final List<Candle> candles;
@@ -1120,6 +1818,10 @@ class CandlestickPainter extends CustomPainter {
   final double maxY;
   final BollingerBandsResult? bb;
   final List<List<double?>>? emaLines;
+  final int startIndex;
+  final int totalLength;
+  final int xLabelInterval;
+  final String interval;
 
   CandlestickPainter({
     required this.candles,
@@ -1127,7 +1829,11 @@ class CandlestickPainter extends CustomPainter {
     required this.maxY,
     this.bb,
     this.emaLines,
-  });
+    this.startIndex = 0,
+    int? totalLength,
+    this.xLabelInterval = 5,
+    this.interval = '1d',
+  }) : totalLength = totalLength ?? candles.length;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1136,28 +1842,35 @@ class CandlestickPainter extends CustomPainter {
     final candleWidth = size.width / candles.length;
     final priceRange = maxY - minY;
 
-    // グリッド線を描画
+    // グリッド線を描画（黒背景用に明るく）
     final gridPaint = Paint()
-      ..color = Colors.grey.withAlpha(50)
-      ..strokeWidth = 1;
+      ..color = Colors.grey.shade800
+      ..strokeWidth = 0.5;
 
+    // 横グリッド線
     for (int i = 0; i <= 5; i++) {
       final y = size.height * i / 5;
       canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
     }
 
-    // ボリンジャーバンドを描画
-    if (bb != null) {
-      _drawIndicatorLine(canvas, size, bb!.middle, Colors.blue, 1.5, priceRange);
-      _drawIndicatorLine(canvas, size, bb!.upper1, Colors.lightBlue, 1.0, priceRange);
-      _drawIndicatorLine(canvas, size, bb!.lower1, Colors.lightBlue, 1.0, priceRange);
-      _drawIndicatorLine(canvas, size, bb!.upper2, Colors.indigo.shade300, 1.0, priceRange);
-      _drawIndicatorLine(canvas, size, bb!.lower2, Colors.indigo.shade300, 1.0, priceRange);
+    // 縦グリッド線（X軸ラベル位置に合わせる）
+    for (int i = 0; i < candles.length; i += xLabelInterval) {
+      final x = i * candleWidth + candleWidth / 2;
+      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
     }
 
-    // EMAを描画
+    // ボリンジャーバンドを描画（グレー系で統一）
+    if (bb != null) {
+      _drawIndicatorLine(canvas, size, bb!.middle, Colors.white70, 1.5, priceRange);
+      _drawIndicatorLine(canvas, size, bb!.upper1, Colors.grey.shade500, 1.0, priceRange);
+      _drawIndicatorLine(canvas, size, bb!.lower1, Colors.grey.shade500, 1.0, priceRange);
+      _drawIndicatorLine(canvas, size, bb!.upper2, Colors.grey.shade600, 1.0, priceRange);
+      _drawIndicatorLine(canvas, size, bb!.lower2, Colors.grey.shade600, 1.0, priceRange);
+    }
+
+    // EMAを描画（オレンジ系で統一）
     if (emaLines != null && emaLines!.isNotEmpty) {
-      final emaColors = [Colors.yellow.shade600, Colors.orange, Colors.deepOrange];
+      final emaColors = [Colors.orange.shade300, Colors.orange, Colors.orange.shade700];
       for (int i = 0; i < emaLines!.length && i < emaColors.length; i++) {
         _drawIndicatorLine(canvas, size, emaLines![i], emaColors[i], 1.5, priceRange);
       }
@@ -1721,6 +2434,31 @@ class _CrossSettingsSheetState extends State<_CrossSettingsSheet> {
     }
   }
 
+  bool _isSendingTest = false;
+
+  Future<void> _sendTestEmail() async {
+    if (_registeredEmails.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('先にメールアドレスを登録してください')),
+      );
+      return;
+    }
+
+    setState(() => _isSendingTest = true);
+
+    final success = await _chartService.sendTestEmail(symbol: widget.symbol);
+
+    if (mounted) {
+      setState(() => _isSendingTest = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(success ? 'テストメールを送信しました' : 'テストメールの送信に失敗しました'),
+          backgroundColor: success ? Colors.green : Colors.red,
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
@@ -2004,6 +2742,22 @@ class _CrossSettingsSheetState extends State<_CrossSettingsSheet> {
                   ),
                 ),
             ],
+            const SizedBox(height: 16),
+            // テスト送信ボタン
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _isSendingTest ? null : _sendTestEmail,
+                icon: _isSendingTest
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.send),
+                label: Text(_isSendingTest ? '送信中...' : 'テストメール送信'),
+              ),
+            ),
           ],
         ),
       ),

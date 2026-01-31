@@ -149,13 +149,20 @@ class ChartService {
     required CrossEvent crossEvent,
     required double currentPrice,
     required double threshold,
+    String? currencySymbol,
   }) async {
     final diff = (currentPrice - crossEvent.price).abs();
     final direction = crossEvent.direction == CrossDirection.up ? '上抜け' : '下抜け';
 
-    final subject = '【$symbol】${crossEvent.displayName}クロス閾値達成';
+    // 通貨シンボルを決定（為替の場合はクォート通貨に応じて変更）
+    final currency = currencySymbol ?? _getCurrencySymbolForSymbol(symbol);
+
+    // 表示用の銘柄名
+    final displaySymbol = _formatDisplaySymbol(symbol);
+
+    final subject = '【$displaySymbol】${crossEvent.displayName}クロス閾値達成';
     final body = '''
-$symbolの${crossEvent.displayName}クロスが閾値に達しました。
+$displaySymbolの${crossEvent.displayName}クロスが閾値に達しました。
 
 【クロス情報】
 インジケーター: ${crossEvent.displayName}
@@ -163,10 +170,10 @@ $symbolの${crossEvent.displayName}クロスが閾値に達しました。
 時間足: $interval
 
 【価格情報】
-クロス時価格: \$${crossEvent.price.toStringAsFixed(2)}
-現在価格: \$${currentPrice.toStringAsFixed(2)}
-差分: \$${diff.toStringAsFixed(2)}
-閾値: \$${threshold.toStringAsFixed(2)}
+クロス時価格: $currency${crossEvent.price.toStringAsFixed(2)}
+現在価格: $currency${currentPrice.toStringAsFixed(2)}
+差分: $currency${diff.toStringAsFixed(2)}
+閾値: $currency${threshold.toStringAsFixed(2)}
 
 クロス発生時刻: ${crossEvent.timestamp.toLocal()}
 ''';
@@ -178,5 +185,59 @@ $symbolの${crossEvent.displayName}クロスが閾値に達しました。
     });
 
     return response.isSuccess;
+  }
+
+  // テストメール送信
+  Future<bool> sendTestEmail({required String symbol}) async {
+    final response = await _api.post('/api/test-email', {
+      'symbol': symbol,
+    });
+    return response.isSuccess;
+  }
+
+  // USD/JPY為替レートを取得
+  Future<double?> getUsdJpyRate() async {
+    final response = await _api.get('/api/forex/usdjpy');
+    if (response.isSuccess && response.json != null) {
+      final rate = response.json!['rate'];
+      if (rate != null) {
+        return (rate as num).toDouble();
+      }
+    }
+    return null;
+  }
+
+  // シンボルに応じた通貨シンボルを取得
+  String _getCurrencySymbolForSymbol(String symbol) {
+    // 為替ペアの場合（=Xで終わる）
+    if (symbol.endsWith('=X')) {
+      final pair = symbol.replaceAll('=X', '');
+      if (pair.endsWith('JPY')) return '¥';
+      if (pair.endsWith('USD')) return '\$';
+      if (pair.endsWith('EUR')) return '€';
+      if (pair.endsWith('GBP')) return '£';
+    }
+    // 日本株の場合（.Tで終わる）
+    if (symbol.endsWith('.T')) {
+      return '¥';
+    }
+    // 暗号通貨・米国株の場合はデフォルトでUSD
+    return '\$';
+  }
+
+  // 表示用の銘柄名をフォーマット
+  String _formatDisplaySymbol(String symbol) {
+    // 為替ペアの場合: USDJPY=X → USD/JPY
+    if (symbol.endsWith('=X')) {
+      final pair = symbol.replaceAll('=X', '');
+      if (pair.length == 6) {
+        return '${pair.substring(0, 3)}/${pair.substring(3)}';
+      }
+    }
+    // 暗号通貨の場合: BTC-USD → BTC
+    if (symbol.endsWith('-USD')) {
+      return symbol.replaceAll('-USD', '');
+    }
+    return symbol;
   }
 }
