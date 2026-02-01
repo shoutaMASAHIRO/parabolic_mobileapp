@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/candle.dart';
 
 // クロスイベントの種類
-enum CrossType { bb, ema }
+enum CrossType { bb, ema, rsi, macd, stochastic, cci }
 
 // クロス方向
 enum CrossDirection { up, down }
@@ -58,6 +58,14 @@ class CrossEvent {
         return _bbDisplayName(indicatorName);
       case CrossType.ema:
         return 'EMA(${indicatorName.replaceAll('ema', '')})';
+      case CrossType.rsi:
+        return _rsiDisplayName(indicatorName);
+      case CrossType.macd:
+        return _macdDisplayName(indicatorName);
+      case CrossType.stochastic:
+        return _stochasticDisplayName(indicatorName);
+      case CrossType.cci:
+        return _cciDisplayName(indicatorName);
     }
   }
 
@@ -69,6 +77,39 @@ class CrossEvent {
       case 'lower1': return 'BB -1σ';
       case 'lower2': return 'BB -2σ';
       default: return name;
+    }
+  }
+
+  String _rsiDisplayName(String name) {
+    switch (name) {
+      case 'overbought': return 'RSI 買われすぎ(70)';
+      case 'oversold': return 'RSI 売られすぎ(30)';
+      default: return 'RSI $name';
+    }
+  }
+
+  String _macdDisplayName(String name) {
+    switch (name) {
+      case 'signal': return 'MACDシグナル';
+      case 'zero': return 'MACDゼロライン';
+      default: return 'MACD $name';
+    }
+  }
+
+  String _stochasticDisplayName(String name) {
+    switch (name) {
+      case 'kd_cross': return 'Stoch %K/%D';
+      case 'overbought': return 'Stoch 買われすぎ(80)';
+      case 'oversold': return 'Stoch 売られすぎ(20)';
+      default: return 'Stoch $name';
+    }
+  }
+
+  String _cciDisplayName(String name) {
+    switch (name) {
+      case 'upper': return 'CCI +100';
+      case 'lower': return 'CCI -100';
+      default: return 'CCI $name';
     }
   }
 }
@@ -101,12 +142,24 @@ class CrossDetectionService {
     required List<Candle> candles,
     required bool checkBB,
     required bool checkEMA,
+    required bool checkRSI,
+    required bool checkMACD,
+    required bool checkStochastic,
+    required bool checkCCI,
     required int bbPeriod,
     required double bbStdDev1,
     required double bbStdDev2,
     required int emaPeriod1,
     required int emaPeriod2,
     required int emaPeriod3,
+    int rsiPeriod = 14,
+    int macdFast = 12,
+    int macdSlow = 26,
+    int macdSignal = 9,
+    int stochKPeriod = 14,
+    int stochDPeriod = 3,
+    int stochSmooth = 3,
+    int cciPeriod = 20,
   }) {
     if (candles.length < 2) return [];
 
@@ -177,6 +230,193 @@ class CrossDetectionService {
             direction: _getCrossDirection(prevClose, curClose, prevLine, curLine),
             timestamp: timestamp,
           ));
+        }
+      }
+    }
+
+    // RSIクロス検知（買われすぎ/売られすぎレベル）
+    if (checkRSI) {
+      final rsi = OscillatorIndicators.calculateRSI(closePrices, period: rsiPeriod);
+      if (rsi.values.length >= 2) {
+        final prevRSI = rsi.values[rsi.values.length - 2];
+        final curRSI = rsi.values.last;
+
+        if (prevRSI != null && curRSI != null) {
+          // RSI 70（買われすぎ）クロス
+          if (_crossed(prevRSI, curRSI, 70, 70)) {
+            events.add(CrossEvent(
+              symbol: symbol,
+              interval: interval,
+              type: CrossType.rsi,
+              indicatorName: 'overbought',
+              price: curClose,
+              lineValue: curRSI,
+              direction: _getCrossDirection(prevRSI, curRSI, 70, 70),
+              timestamp: timestamp,
+            ));
+          }
+
+          // RSI 30（売られすぎ）クロス
+          if (_crossed(prevRSI, curRSI, 30, 30)) {
+            events.add(CrossEvent(
+              symbol: symbol,
+              interval: interval,
+              type: CrossType.rsi,
+              indicatorName: 'oversold',
+              price: curClose,
+              lineValue: curRSI,
+              direction: _getCrossDirection(prevRSI, curRSI, 30, 30),
+              timestamp: timestamp,
+            ));
+          }
+        }
+      }
+    }
+
+    // MACDクロス検知（シグナルラインとゼロライン）
+    if (checkMACD) {
+      final macd = OscillatorIndicators.calculateMACD(
+        closePrices,
+        fastPeriod: macdFast,
+        slowPeriod: macdSlow,
+        signalPeriod: macdSignal,
+      );
+
+      if (macd.macdLine.length >= 2 && macd.signalLine.length >= 2) {
+        final prevMACD = macd.macdLine[macd.macdLine.length - 2];
+        final curMACD = macd.macdLine.last;
+        final prevSignal = macd.signalLine[macd.signalLine.length - 2];
+        final curSignal = macd.signalLine.last;
+
+        // MACDとシグナルラインのクロス
+        if (prevMACD != null && curMACD != null && prevSignal != null && curSignal != null) {
+          if (_crossed(prevMACD, curMACD, prevSignal, curSignal)) {
+            events.add(CrossEvent(
+              symbol: symbol,
+              interval: interval,
+              type: CrossType.macd,
+              indicatorName: 'signal',
+              price: curClose,
+              lineValue: curMACD,
+              direction: _getCrossDirection(prevMACD, curMACD, prevSignal, curSignal),
+              timestamp: timestamp,
+            ));
+          }
+
+          // MACDとゼロラインのクロス
+          if (_crossed(prevMACD, curMACD, 0, 0)) {
+            events.add(CrossEvent(
+              symbol: symbol,
+              interval: interval,
+              type: CrossType.macd,
+              indicatorName: 'zero',
+              price: curClose,
+              lineValue: curMACD,
+              direction: _getCrossDirection(prevMACD, curMACD, 0, 0),
+              timestamp: timestamp,
+            ));
+          }
+        }
+      }
+    }
+
+    // ストキャスティクスクロス検知
+    if (checkStochastic) {
+      final stoch = OscillatorIndicators.calculateStochastic(
+        candles,
+        kPeriod: stochKPeriod,
+        dPeriod: stochDPeriod,
+        smooth: stochSmooth,
+      );
+
+      if (stoch.percentK.length >= 2 && stoch.percentD.length >= 2) {
+        final prevK = stoch.percentK[stoch.percentK.length - 2];
+        final curK = stoch.percentK.last;
+        final prevD = stoch.percentD[stoch.percentD.length - 2];
+        final curD = stoch.percentD.last;
+
+        if (prevK != null && curK != null && prevD != null && curD != null) {
+          // %Kと%Dのクロス
+          if (_crossed(prevK, curK, prevD, curD)) {
+            events.add(CrossEvent(
+              symbol: symbol,
+              interval: interval,
+              type: CrossType.stochastic,
+              indicatorName: 'kd_cross',
+              price: curClose,
+              lineValue: curK,
+              direction: _getCrossDirection(prevK, curK, prevD, curD),
+              timestamp: timestamp,
+            ));
+          }
+
+          // 80（買われすぎ）クロス
+          if (_crossed(prevK, curK, 80, 80)) {
+            events.add(CrossEvent(
+              symbol: symbol,
+              interval: interval,
+              type: CrossType.stochastic,
+              indicatorName: 'overbought',
+              price: curClose,
+              lineValue: curK,
+              direction: _getCrossDirection(prevK, curK, 80, 80),
+              timestamp: timestamp,
+            ));
+          }
+
+          // 20（売られすぎ）クロス
+          if (_crossed(prevK, curK, 20, 20)) {
+            events.add(CrossEvent(
+              symbol: symbol,
+              interval: interval,
+              type: CrossType.stochastic,
+              indicatorName: 'oversold',
+              price: curClose,
+              lineValue: curK,
+              direction: _getCrossDirection(prevK, curK, 20, 20),
+              timestamp: timestamp,
+            ));
+          }
+        }
+      }
+    }
+
+    // CCIクロス検知（±100レベル）
+    if (checkCCI) {
+      final cci = OscillatorIndicators.calculateCCI(candles, period: cciPeriod);
+
+      if (cci.values.length >= 2) {
+        final prevCCI = cci.values[cci.values.length - 2];
+        final curCCI = cci.values.last;
+
+        if (prevCCI != null && curCCI != null) {
+          // +100クロス
+          if (_crossed(prevCCI, curCCI, 100, 100)) {
+            events.add(CrossEvent(
+              symbol: symbol,
+              interval: interval,
+              type: CrossType.cci,
+              indicatorName: 'upper',
+              price: curClose,
+              lineValue: curCCI,
+              direction: _getCrossDirection(prevCCI, curCCI, 100, 100),
+              timestamp: timestamp,
+            ));
+          }
+
+          // -100クロス
+          if (_crossed(prevCCI, curCCI, -100, -100)) {
+            events.add(CrossEvent(
+              symbol: symbol,
+              interval: interval,
+              type: CrossType.cci,
+              indicatorName: 'lower',
+              price: curClose,
+              lineValue: curCCI,
+              direction: _getCrossDirection(prevCCI, curCCI, -100, -100),
+              timestamp: timestamp,
+            ));
+          }
         }
       }
     }

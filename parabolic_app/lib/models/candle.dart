@@ -163,3 +163,262 @@ class BollingerBandsResult {
     required this.lower2,
   });
 }
+
+// RSIの結果
+class RSIResult {
+  final List<double?> values;
+  final int period;
+
+  RSIResult({required this.values, required this.period});
+}
+
+// MACDの結果
+class MACDResult {
+  final List<double?> macdLine;     // MACD線
+  final List<double?> signalLine;   // シグナル線
+  final List<double?> histogram;    // ヒストグラム
+
+  MACDResult({
+    required this.macdLine,
+    required this.signalLine,
+    required this.histogram,
+  });
+}
+
+// ストキャスティクスの結果
+class StochasticResult {
+  final List<double?> percentK;   // %K
+  final List<double?> percentD;   // %D
+
+  StochasticResult({
+    required this.percentK,
+    required this.percentD,
+  });
+}
+
+// CCIの結果
+class CCIResult {
+  final List<double?> values;
+  final int period;
+
+  CCIResult({required this.values, required this.period});
+}
+
+// オシレーター計算クラス（TechnicalIndicatorsの拡張）
+class OscillatorIndicators {
+  // RSI（相対力指数）を計算
+  static RSIResult calculateRSI(List<double> prices, {int period = 14}) {
+    final result = List<double?>.filled(prices.length, null);
+
+    if (prices.length < period + 1) {
+      return RSIResult(values: result, period: period);
+    }
+
+    // 価格変動を計算
+    final gains = <double>[];
+    final losses = <double>[];
+
+    for (int i = 1; i < prices.length; i++) {
+      final change = prices[i] - prices[i - 1];
+      gains.add(change > 0 ? change : 0);
+      losses.add(change < 0 ? -change : 0);
+    }
+
+    // 最初のRS計算（SMA）
+    double avgGain = 0;
+    double avgLoss = 0;
+    for (int i = 0; i < period; i++) {
+      avgGain += gains[i];
+      avgLoss += losses[i];
+    }
+    avgGain /= period;
+    avgLoss /= period;
+
+    // 最初のRSI
+    if (avgLoss == 0) {
+      result[period] = 100;
+    } else {
+      final rs = avgGain / avgLoss;
+      result[period] = 100 - (100 / (1 + rs));
+    }
+
+    // 残りのRSI（Wilder's Smoothing Method）
+    for (int i = period; i < gains.length; i++) {
+      avgGain = (avgGain * (period - 1) + gains[i]) / period;
+      avgLoss = (avgLoss * (period - 1) + losses[i]) / period;
+
+      if (avgLoss == 0) {
+        result[i + 1] = 100;
+      } else {
+        final rs = avgGain / avgLoss;
+        result[i + 1] = 100 - (100 / (1 + rs));
+      }
+    }
+
+    return RSIResult(values: result, period: period);
+  }
+
+  // MACD（移動平均収束拡散）を計算
+  static MACDResult calculateMACD(
+    List<double> prices, {
+    int fastPeriod = 12,
+    int slowPeriod = 26,
+    int signalPeriod = 9,
+  }) {
+    final length = prices.length;
+    final macdLine = List<double?>.filled(length, null);
+    final signalLine = List<double?>.filled(length, null);
+    final histogram = List<double?>.filled(length, null);
+
+    if (length < slowPeriod) {
+      return MACDResult(
+        macdLine: macdLine,
+        signalLine: signalLine,
+        histogram: histogram,
+      );
+    }
+
+    // Fast EMAとSlow EMAを計算
+    final fastEMA = TechnicalIndicators.calculateEMA(prices, fastPeriod);
+    final slowEMA = TechnicalIndicators.calculateEMA(prices, slowPeriod);
+
+    // MACDライン = Fast EMA - Slow EMA
+    final macdValues = <double>[];
+    for (int i = 0; i < length; i++) {
+      if (fastEMA[i] != null && slowEMA[i] != null) {
+        macdLine[i] = fastEMA[i]! - slowEMA[i]!;
+        macdValues.add(macdLine[i]!);
+      }
+    }
+
+    // シグナルライン = MACDラインのEMA
+    if (macdValues.length >= signalPeriod) {
+      final signalEMA = TechnicalIndicators.calculateEMA(macdValues, signalPeriod);
+
+      // シグナル値をマッピング
+      int signalIdx = 0;
+      for (int i = 0; i < length; i++) {
+        if (macdLine[i] != null) {
+          if (signalIdx < signalEMA.length && signalEMA[signalIdx] != null) {
+            signalLine[i] = signalEMA[signalIdx];
+            histogram[i] = macdLine[i]! - signalLine[i]!;
+          }
+          signalIdx++;
+        }
+      }
+    }
+
+    return MACDResult(
+      macdLine: macdLine,
+      signalLine: signalLine,
+      histogram: histogram,
+    );
+  }
+
+  // ストキャスティクスを計算
+  static StochasticResult calculateStochastic(
+    List<Candle> candles, {
+    int kPeriod = 14,
+    int dPeriod = 3,
+    int smooth = 3,
+  }) {
+    final length = candles.length;
+    final rawK = List<double?>.filled(length, null);
+    final percentK = List<double?>.filled(length, null);
+    final percentD = List<double?>.filled(length, null);
+
+    if (length < kPeriod) {
+      return StochasticResult(percentK: percentK, percentD: percentD);
+    }
+
+    // Raw %K を計算
+    for (int i = kPeriod - 1; i < length; i++) {
+      double highestHigh = candles[i].high;
+      double lowestLow = candles[i].low;
+
+      for (int j = i - kPeriod + 1; j <= i; j++) {
+        if (candles[j].high > highestHigh) highestHigh = candles[j].high;
+        if (candles[j].low < lowestLow) lowestLow = candles[j].low;
+      }
+
+      final range = highestHigh - lowestLow;
+      if (range > 0) {
+        rawK[i] = ((candles[i].close - lowestLow) / range) * 100;
+      } else {
+        rawK[i] = 50; // レンジがない場合は中間値
+      }
+    }
+
+    // %K（Raw %KのSMA）を計算
+    for (int i = kPeriod - 1 + smooth - 1; i < length; i++) {
+      double sum = 0;
+      int count = 0;
+      for (int j = i - smooth + 1; j <= i; j++) {
+        if (rawK[j] != null) {
+          sum += rawK[j]!;
+          count++;
+        }
+      }
+      if (count > 0) {
+        percentK[i] = sum / count;
+      }
+    }
+
+    // %D（%KのSMA）を計算
+    for (int i = kPeriod - 1 + smooth - 1 + dPeriod - 1; i < length; i++) {
+      double sum = 0;
+      int count = 0;
+      for (int j = i - dPeriod + 1; j <= i; j++) {
+        if (percentK[j] != null) {
+          sum += percentK[j]!;
+          count++;
+        }
+      }
+      if (count > 0) {
+        percentD[i] = sum / count;
+      }
+    }
+
+    return StochasticResult(percentK: percentK, percentD: percentD);
+  }
+
+  // CCI（商品チャンネル指数）を計算
+  static CCIResult calculateCCI(List<Candle> candles, {int period = 20}) {
+    final length = candles.length;
+    final result = List<double?>.filled(length, null);
+
+    if (length < period) {
+      return CCIResult(values: result, period: period);
+    }
+
+    // Typical Price = (High + Low + Close) / 3
+    final typicalPrices = candles
+        .map((c) => (c.high + c.low + c.close) / 3)
+        .toList();
+
+    for (int i = period - 1; i < length; i++) {
+      // SMA of Typical Price
+      double sum = 0;
+      for (int j = i - period + 1; j <= i; j++) {
+        sum += typicalPrices[j];
+      }
+      final sma = sum / period;
+
+      // Mean Deviation
+      double meanDev = 0;
+      for (int j = i - period + 1; j <= i; j++) {
+        meanDev += (typicalPrices[j] - sma).abs();
+      }
+      meanDev /= period;
+
+      // CCI = (Typical Price - SMA) / (0.015 * Mean Deviation)
+      if (meanDev > 0) {
+        result[i] = (typicalPrices[i] - sma) / (0.015 * meanDev);
+      } else {
+        result[i] = 0;
+      }
+    }
+
+    return CCIResult(values: result, period: period);
+  }
+}

@@ -108,6 +108,19 @@ class ChartService {
     required int emaPeriod2,
     required int emaPeriod3,
     required bool emailAlertsEnabled,
+    // オシレーター設定
+    bool rsiEnabled = false,
+    int rsiPeriod = 14,
+    bool macdEnabled = false,
+    int macdFast = 12,
+    int macdSlow = 26,
+    int macdSignal = 9,
+    bool stochasticEnabled = false,
+    int stochKPeriod = 14,
+    int stochDPeriod = 3,
+    int stochSmooth = 3,
+    bool cciEnabled = false,
+    int cciPeriod = 20,
   }) async {
     final response = await _api.post('/api/mobile/indicator-settings', {
       'areBollingerBandsVisible': bbEnabled,
@@ -118,6 +131,19 @@ class ChartService {
       'ema2Period': emaPeriod2,
       'ema3Period': emaPeriod3,
       'emailAlertsEnabled': emailAlertsEnabled,
+      // オシレーター設定
+      'rsiEnabled': rsiEnabled,
+      'rsiPeriod': rsiPeriod,
+      'macdEnabled': macdEnabled,
+      'macdFast': macdFast,
+      'macdSlow': macdSlow,
+      'macdSignal': macdSignal,
+      'stochasticEnabled': stochasticEnabled,
+      'stochKPeriod': stochKPeriod,
+      'stochDPeriod': stochDPeriod,
+      'stochSmooth': stochSmooth,
+      'cciEnabled': cciEnabled,
+      'cciPeriod': cciPeriod,
     });
     return response.isSuccess;
   }

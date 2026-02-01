@@ -86,6 +86,23 @@ class _DetailScreenState extends State<DetailScreen> {
       enabled: false,
       params: {'period1': 10, 'period2': 25, 'period3': 50},
     ),
+    // オシレーター
+    'rsi': IndicatorSettings(
+      enabled: false,
+      params: {'period': 14},
+    ),
+    'macd': IndicatorSettings(
+      enabled: false,
+      params: {'fast': 12, 'slow': 26, 'signal': 9},
+    ),
+    'stochastic': IndicatorSettings(
+      enabled: false,
+      params: {'kPeriod': 14, 'dPeriod': 3, 'smooth': 3},
+    ),
+    'cci': IndicatorSettings(
+      enabled: false,
+      params: {'period': 20},
+    ),
   };
 
   final List<String> _intervals = ['5m', '15m', '30m', '1h', '4h', '1d', '1wk', '1mo'];
@@ -97,6 +114,10 @@ class _DetailScreenState extends State<DetailScreen> {
   // インジケーターのゲッター
   bool get _showBB => _indicators['bb']?.enabled ?? false;
   bool get _showEMA => _indicators['ema']?.enabled ?? false;
+  bool get _showRSI => _indicators['rsi']?.enabled ?? false;
+  bool get _showMACD => _indicators['macd']?.enabled ?? false;
+  bool get _showStochastic => _indicators['stochastic']?.enabled ?? false;
+  bool get _showCCI => _indicators['cci']?.enabled ?? false;
 
   // パラメータのゲッター（型安全に変換）
   int get _bbPeriod => _safeInt(_indicators['bb']?.params['period'], 20);
@@ -105,6 +126,16 @@ class _DetailScreenState extends State<DetailScreen> {
   int get _emaPeriod1 => _safeInt(_indicators['ema']?.params['period1'], 10);
   int get _emaPeriod2 => _safeInt(_indicators['ema']?.params['period2'], 25);
   int get _emaPeriod3 => _safeInt(_indicators['ema']?.params['period3'], 50);
+
+  // オシレーターパラメータのゲッター
+  int get _rsiPeriod => _safeInt(_indicators['rsi']?.params['period'], 14);
+  int get _macdFast => _safeInt(_indicators['macd']?.params['fast'], 12);
+  int get _macdSlow => _safeInt(_indicators['macd']?.params['slow'], 26);
+  int get _macdSignal => _safeInt(_indicators['macd']?.params['signal'], 9);
+  int get _stochKPeriod => _safeInt(_indicators['stochastic']?.params['kPeriod'], 14);
+  int get _stochDPeriod => _safeInt(_indicators['stochastic']?.params['dPeriod'], 3);
+  int get _stochSmooth => _safeInt(_indicators['stochastic']?.params['smooth'], 3);
+  int get _cciPeriod => _safeInt(_indicators['cci']?.params['period'], 20);
 
   // 型安全なint変換
   static int _safeInt(dynamic value, int defaultValue) {
@@ -154,6 +185,20 @@ class _DetailScreenState extends State<DetailScreen> {
         _indicators['ema']!.params['period2'] = _safeInt(settings['ema2Period'], 25);
         _indicators['ema']!.params['period3'] = _safeInt(settings['ema3Period'], 50);
         _emailNotificationEnabled = settings['emailAlertsEnabled'] == true;
+
+        // オシレーター設定
+        _indicators['rsi']!.enabled = settings['rsiEnabled'] == true;
+        _indicators['rsi']!.params['period'] = _safeInt(settings['rsiPeriod'], 14);
+        _indicators['macd']!.enabled = settings['macdEnabled'] == true;
+        _indicators['macd']!.params['fast'] = _safeInt(settings['macdFast'], 12);
+        _indicators['macd']!.params['slow'] = _safeInt(settings['macdSlow'], 26);
+        _indicators['macd']!.params['signal'] = _safeInt(settings['macdSignal'], 9);
+        _indicators['stochastic']!.enabled = settings['stochasticEnabled'] == true;
+        _indicators['stochastic']!.params['kPeriod'] = _safeInt(settings['stochKPeriod'], 14);
+        _indicators['stochastic']!.params['dPeriod'] = _safeInt(settings['stochDPeriod'], 3);
+        _indicators['stochastic']!.params['smooth'] = _safeInt(settings['stochSmooth'], 3);
+        _indicators['cci']!.enabled = settings['cciEnabled'] == true;
+        _indicators['cci']!.params['period'] = _safeInt(settings['cciPeriod'], 20);
       });
     }
   }
@@ -262,10 +307,11 @@ class _DetailScreenState extends State<DetailScreen> {
     setState(() {
       _isLoading = true;
       _error = null;
+      _noMoreOlderData = false; // 過去データ取得フラグをリセット
     });
 
     try {
-      // チャートデータと為替レートを並行取得
+      // APIから3年分のデータを取得する（という想定）
       final results = await Future.wait([
         _chartService.getChartData(widget.symbol, interval: _interval),
         _chartService.getUsdJpyRate(),
@@ -280,6 +326,25 @@ class _DetailScreenState extends State<DetailScreen> {
           if (rate != null) {
             _usdJpyRate = rate;
           }
+
+          // --- 初期スクロール位置の計算 ---
+          // 3年分のうち、最新の1年分を表示する
+          const double initialDisplayRatio = 1.0 / 3.0; // 1/3を表示
+          if (_candles.length > 1) {
+            final totalDataPoints = _candles.length.toDouble();
+            final visibleDataPoints = totalDataPoints / _chartZoom; // 現在のズームレベルでの表示数
+            final maxPanOffset = totalDataPoints - visibleDataPoints;
+            if (maxPanOffset > 0) {
+              // 全体の 2/3 の位置から表示を開始する
+              _chartPanOffsetX = (1.0 - initialDisplayRatio).clamp(0.0, 1.0);
+            } else {
+              _chartPanOffsetX = 0.0;
+            }
+          } else {
+            _chartPanOffsetX = 0.0;
+          }
+          // --- ここまで ---
+
           _isLoading = false;
         });
 
@@ -348,9 +413,12 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+  // 過去データがこれ以上ないことを示すフラグ
+  bool _noMoreOlderData = false;
+
   // 無限スクロールで過去のデータを取得
   Future<void> _fetchOlderData() async {
-    if (_isFetchingOlderData || _candles.isEmpty) return;
+    if (_isFetchingOlderData || _candles.isEmpty || _noMoreOlderData) return;
 
     setState(() {
       _isFetchingOlderData = true;
@@ -366,28 +434,37 @@ class _DetailScreenState extends State<DetailScreen> {
 
       if (olderCandles.isNotEmpty && mounted) {
         // 安全装置: 取得したデータが本当に古いデータであることを確認
-        // 取得したデータの最後のキャンドルの日付が、既存の最も古いキャンドルの日付より前であること
         if (olderCandles.last.date.isBefore(_candles.first.date)) {
           setState(() {
             final newCandlesCount = olderCandles.length;
             final oldTotalDataPoints = _candles.length.toDouble();
+            final oldVisibleDataPoints = oldTotalDataPoints / _chartZoom;
+
+            // 現在表示している位置（データポイント数）を計算
+            final oldMaxPanOffset = oldTotalDataPoints - oldVisibleDataPoints;
+            final currentViewStartIndex = (_chartPanOffsetX * oldMaxPanOffset);
 
             _candles.insertAll(0, olderCandles);
 
-            // 表示がジャンプしないようにスクロール位置を調整
+            // 新しいデータが追加された後も同じ位置を表示し続けるように調整
             final newTotalDataPoints = _candles.length.toDouble();
-            final visibleDataPoints = (oldTotalDataPoints / _chartZoom).round();
-            final newMaxPanOffset = newTotalDataPoints - visibleDataPoints;
+            final newVisibleDataPoints = newTotalDataPoints / _chartZoom;
+            final newMaxPanOffset = newTotalDataPoints - newVisibleDataPoints;
 
             if (newMaxPanOffset > 0) {
-              final newPanOffsetInPoints = newCandlesCount.toDouble();
-              _chartPanOffsetX = (newPanOffsetInPoints / newMaxPanOffset).clamp(0.0, 1.0);
+              // 元の表示位置に新しいデータ分のオフセットを加算
+              final newViewStartIndex = currentViewStartIndex + newCandlesCount;
+              _chartPanOffsetX = (newViewStartIndex / newMaxPanOffset).clamp(0.0, 1.0);
             }
           });
         } else {
-          // 取得したデータが古くない場合（バックエンドのtoパラメータが機能していない可能性）
-          debugPrint("Infinite scroll: Fetched data is not older than existing data. Backend may not be handling the 'to' parameter correctly or no older data is available.");
+          // 取得したデータが古くない場合、これ以上過去データがない
+          _noMoreOlderData = true;
+          debugPrint("No more older data available.");
         }
+      } else {
+        // データが空の場合、これ以上過去データがない
+        _noMoreOlderData = true;
       }
     } catch (e) {
       debugPrint('Failed to fetch older chart data: $e');
@@ -400,6 +477,8 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+
+
   // インジケーター設定をサーバーに同期
   Future<void> _syncIndicatorSettingsToServer() async {
     await _chartService.saveIndicatorSettingsToServer(
@@ -411,6 +490,19 @@ class _DetailScreenState extends State<DetailScreen> {
       emaPeriod2: _emaPeriod2,
       emaPeriod3: _emaPeriod3,
       emailAlertsEnabled: _emailNotificationEnabled,
+      // オシレーター設定
+      rsiEnabled: _showRSI,
+      rsiPeriod: _rsiPeriod,
+      macdEnabled: _showMACD,
+      macdFast: _macdFast,
+      macdSlow: _macdSlow,
+      macdSignal: _macdSignal,
+      stochasticEnabled: _showStochastic,
+      stochKPeriod: _stochKPeriod,
+      stochDPeriod: _stochDPeriod,
+      stochSmooth: _stochSmooth,
+      cciEnabled: _showCCI,
+      cciPeriod: _cciPeriod,
     );
   }
 
@@ -989,6 +1081,42 @@ class _DetailScreenState extends State<DetailScreen> {
           color: AppColors.emaMedium,
           icon: Icons.show_chart,
         );
+      case 'rsi':
+        return _IndicatorConfig(
+          key: 'rsi',
+          name: 'RSI',
+          fullName: '相対力指数',
+          description: '買われすぎ(70)/売られすぎ(30)',
+          color: AppColors.rsiLine,
+          icon: Icons.trending_up,
+        );
+      case 'macd':
+        return _IndicatorConfig(
+          key: 'macd',
+          name: 'MACD',
+          fullName: '移動平均収束拡散',
+          description: 'シグナルラインとのクロス',
+          color: AppColors.macdLine,
+          icon: Icons.bar_chart,
+        );
+      case 'stochastic':
+        return _IndicatorConfig(
+          key: 'stochastic',
+          name: 'Stoch',
+          fullName: 'ストキャスティクス',
+          description: '%K/%Dクロス、80/20レベル',
+          color: AppColors.stochK,
+          icon: Icons.ssid_chart,
+        );
+      case 'cci':
+        return _IndicatorConfig(
+          key: 'cci',
+          name: 'CCI',
+          fullName: '商品チャンネル指数',
+          description: '±100レベルのクロス',
+          color: AppColors.cciLine,
+          icon: Icons.multiline_chart,
+        );
       default:
         return _IndicatorConfig(
           key: key,
@@ -1197,6 +1325,10 @@ class _DetailScreenState extends State<DetailScreen> {
     // X軸ラベル間隔を計算（重複防止）
     final xLabelInterval = _calculateXLabelInterval(visibleCandles.length);
 
+    // オシレーター用の元リストのインデックス
+    final originalListVisibleStartIdx = visibleStartIdx + startOffset;
+    final originalListVisibleEndIdx = visibleEndIdx + 1 + startOffset;
+
     return SizedBox(
       width: double.infinity,
       child: Column(
@@ -1221,61 +1353,51 @@ class _DetailScreenState extends State<DetailScreen> {
                       chartHeight: 300,
                       visibleCandles: visibleCandles,
                       visibleStartIdx: visibleStartIdx,
-                      child: LineChart(
-                        LineChartData(
-                          gridData: FlGridData(
-                            show: true,
-                            drawVerticalLine: true,
-                            horizontalInterval: (adjustedMaxY - adjustedMinY) / 10,
-                            verticalInterval: xLabelInterval.toDouble(),
-                            getDrawingHorizontalLine: (value) {
-                              return FlLine(
-                                color: AppColors.textSecondary.withOpacity(0.8),
-                                strokeWidth: 0.5,
-                                dashArray: [3, 3],
-                              );
-                            },
-                            getDrawingVerticalLine: (value) {
-                              return FlLine(
-                                color: AppColors.textSecondary.withOpacity(0.8),
-                                strokeWidth: 0.5,
-                                dashArray: [3, 3],
-                              );
-                            },
-                          ),
-                          titlesData: const FlTitlesData(show: false),
-                          borderData: FlBorderData(
-                            show: true,
-                            border: const Border(
-                              left: BorderSide(color: AppColors.textSecondary, width: 1.5),
-                              top: BorderSide(color: AppColors.textSecondary, width: 1.5),
-                              right: BorderSide(color: AppColors.textSecondary, width: 1.5),
-                              bottom: BorderSide(color: AppColors.textSecondary, width: 1.5),
-                            ),
-                          ),
-                          minX: visibleMinX,
-                          maxX: visibleMaxX,
-                          minY: adjustedMinY,
-                          maxY: adjustedMaxY,
-                          lineBarsData: lineBars,
-                          clipData: const FlClipData.all(),
-                          lineTouchData: LineTouchData(
-                            touchTooltipData: LineTouchTooltipData(
-                              getTooltipItems: (touchedSpots) {
-                                return touchedSpots.map((spot) {
-                                  final index = spot.x.toInt();
-                                  if (index < 0 || index >= displayCandles.length) return null;
-                                  if (spot.barIndex != 0) return null;
-                                  final candle = displayCandles[index];
-                                  return LineTooltipItem(
-                                    '${DateFormat('yyyy/MM/dd').format(candle.date)}\n${_formatPriceWithCurrency(candle.close)}',
-                                    const TextStyle(color: Colors.white),
-                                  );
-                                }).toList();
-                              },
-                            ),
-                          ),
-                        ),
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return Stack(
+                            children: [
+                              // グリッド・枠線（背景）
+                              CustomPaint(
+                                size: Size(constraints.maxWidth, 300),
+                                painter: ChartGridPainter(
+                                  dataLength: visibleCandles.length,
+                                  xLabelInterval: xLabelInterval,
+                                ),
+                              ),
+                              // 折れ線チャート（グリッド・枠線なし）
+                              LineChart(
+                                LineChartData(
+                                  gridData: const FlGridData(show: false),
+                                  titlesData: const FlTitlesData(show: false),
+                                  borderData: FlBorderData(show: false),
+                                  minX: visibleMinX,
+                                  maxX: visibleMaxX,
+                                  minY: adjustedMinY,
+                                  maxY: adjustedMaxY,
+                                  lineBarsData: lineBars,
+                                  clipData: const FlClipData.all(),
+                                  lineTouchData: LineTouchData(
+                                    touchTooltipData: LineTouchTooltipData(
+                                      getTooltipItems: (touchedSpots) {
+                                        return touchedSpots.map((spot) {
+                                          final index = spot.x.toInt();
+                                          if (index < 0 || index >= displayCandles.length) return null;
+                                          if (spot.barIndex != 0) return null;
+                                          final candle = displayCandles[index];
+                                          return LineTooltipItem(
+                                            '${DateFormat('yyyy/MM/dd').format(candle.date)}\n${_formatPriceWithCurrency(candle.close)}',
+                                            const TextStyle(color: Colors.white),
+                                          );
+                                        }).toList();
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          );
+                        },
                       ),
                     ),
                     // X軸ラベル（下側）
@@ -1288,6 +1410,9 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
             ],
           ),
+          // オシレーターパネル
+          if (_hasActiveOscillator)
+            _buildOscillatorPanels(candles, originalListVisibleStartIdx, originalListVisibleEndIdx),
           // クロスヘア情報表示
           if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length)
             _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
@@ -1322,13 +1447,21 @@ class _DetailScreenState extends State<DetailScreen> {
             final deltaX = details.focalPointDelta.dx / 150 * sensitivity;
             final deltaY = details.focalPointDelta.dy / 120 * sensitivity;
 
-            // 左端でさらに左にドラッグした場合、過去データを読み込む
-            // focalPointDelta.dx > 0 は、指を左から右に動かした（チャートを左に動かした）場合
-            if (_chartPanOffsetX == 0.0 && details.focalPointDelta.dx > 5.0) {
+            // --- 無限スクロールのトリガーロジック（改善版） ---
+            // 1. クランプ前の新しいオフセットを計算
+            final potentialNewPanOffsetX = _chartPanOffsetX - deltaX;
+
+            // 2. 左の境界を超えてドラッグしようとしたことを検知
+            if (potentialNewPanOffsetX < _chartPanOffsetX && // 左に動かそうとしていて
+                _chartPanOffsetX < 0.01 && // すでに左端にいる場合
+                !_isFetchingOlderData && !_noMoreOlderData) {
               _fetchOlderData();
             }
 
-            _chartPanOffsetX = (_chartPanOffsetX - deltaX).clamp(0.0, (1.0 - (1.0 / _chartZoom)).clamp(0.0, 1.0));
+            // 3. 境界内にオフセットをクランプして適用
+            _chartPanOffsetX = potentialNewPanOffsetX.clamp(0.0, (1.0 - (1.0 / _chartZoom)).clamp(0.0, 1.0));
+            // --- ここまで ---
+
             _chartPanOffsetY = (_chartPanOffsetY + deltaY).clamp(-1.5, 1.5);
           }
           _lastFocalPoint = details.focalPoint;
@@ -1731,11 +1864,240 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
             ],
           ),
+          // オシレーターパネル
+          if (_hasActiveOscillator)
+            _buildOscillatorPanels(candles, originalListVisibleStartIdx, originalListVisibleEndIdx),
           // クロスヘア情報表示
           if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length)
             _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
         ],
       ),
+    );
+  }
+
+  // オシレーターが有効かどうか
+  bool get _hasActiveOscillator => _showRSI || _showMACD || _showStochastic || _showCCI;
+
+  // オシレーターパネルを構築
+  Widget _buildOscillatorPanels(List<Candle> candles, int visibleStartIdx, int visibleEndIdx) {
+    final closePrices = candles.map((c) => c.close).toList();
+    final panels = <Widget>[];
+
+    // RSIパネル
+    if (_showRSI) {
+      final rsi = OscillatorIndicators.calculateRSI(closePrices, period: _rsiPeriod);
+      final visibleRSI = rsi.values.sublist(
+        visibleStartIdx.clamp(0, rsi.values.length),
+        visibleEndIdx.clamp(0, rsi.values.length),
+      );
+      panels.add(_buildSingleOscillatorPanel(
+        title: 'RSI($_rsiPeriod)',
+        values: visibleRSI,
+        minY: 0,
+        maxY: 100,
+        lineColor: AppColors.rsiLine,
+        oscillatorType: 'rsi',
+      ));
+    }
+
+    // MACDパネル
+    if (_showMACD) {
+      final macd = OscillatorIndicators.calculateMACD(
+        closePrices,
+        fastPeriod: _macdFast,
+        slowPeriod: _macdSlow,
+        signalPeriod: _macdSignal,
+      );
+      final visibleMACD = macd.macdLine.sublist(
+        visibleStartIdx.clamp(0, macd.macdLine.length),
+        visibleEndIdx.clamp(0, macd.macdLine.length),
+      );
+      final visibleSignal = macd.signalLine.sublist(
+        visibleStartIdx.clamp(0, macd.signalLine.length),
+        visibleEndIdx.clamp(0, macd.signalLine.length),
+      );
+      final visibleHistogram = macd.histogram.sublist(
+        visibleStartIdx.clamp(0, macd.histogram.length),
+        visibleEndIdx.clamp(0, macd.histogram.length),
+      );
+
+      // MACDの範囲を計算
+      double macdMin = 0, macdMax = 0;
+      for (final v in visibleMACD) {
+        if (v != null) {
+          macdMin = min(macdMin, v);
+          macdMax = max(macdMax, v);
+        }
+      }
+      for (final v in visibleSignal) {
+        if (v != null) {
+          macdMin = min(macdMin, v);
+          macdMax = max(macdMax, v);
+        }
+      }
+      final macdPadding = (macdMax - macdMin) * 0.1;
+
+      panels.add(_buildSingleOscillatorPanel(
+        title: 'MACD($_macdFast,$_macdSlow,$_macdSignal)',
+        values: visibleMACD,
+        minY: macdMin - macdPadding,
+        maxY: macdMax + macdPadding,
+        lineColor: AppColors.macdLine,
+        oscillatorType: 'macd',
+        signalLine: visibleSignal,
+        histogram: visibleHistogram,
+      ));
+    }
+
+    // Stochasticパネル
+    if (_showStochastic) {
+      final stoch = OscillatorIndicators.calculateStochastic(
+        candles,
+        kPeriod: _stochKPeriod,
+        dPeriod: _stochDPeriod,
+        smooth: _stochSmooth,
+      );
+      final visibleK = stoch.percentK.sublist(
+        visibleStartIdx.clamp(0, stoch.percentK.length),
+        visibleEndIdx.clamp(0, stoch.percentK.length),
+      );
+      final visibleD = stoch.percentD.sublist(
+        visibleStartIdx.clamp(0, stoch.percentD.length),
+        visibleEndIdx.clamp(0, stoch.percentD.length),
+      );
+
+      panels.add(_buildSingleOscillatorPanel(
+        title: 'Stoch($_stochKPeriod,$_stochDPeriod,$_stochSmooth)',
+        values: visibleK,
+        minY: 0,
+        maxY: 100,
+        lineColor: AppColors.stochK,
+        oscillatorType: 'stochastic',
+        signalLine: visibleD,
+      ));
+    }
+
+    // CCIパネル
+    if (_showCCI) {
+      final cci = OscillatorIndicators.calculateCCI(candles, period: _cciPeriod);
+      final visibleCCI = cci.values.sublist(
+        visibleStartIdx.clamp(0, cci.values.length),
+        visibleEndIdx.clamp(0, cci.values.length),
+      );
+
+      // CCIの範囲を計算
+      double cciMin = -100, cciMax = 100;
+      for (final v in visibleCCI) {
+        if (v != null) {
+          cciMin = min(cciMin, v);
+          cciMax = max(cciMax, v);
+        }
+      }
+      final cciPadding = (cciMax - cciMin) * 0.1;
+
+      panels.add(_buildSingleOscillatorPanel(
+        title: 'CCI($_cciPeriod)',
+        values: visibleCCI,
+        minY: cciMin - cciPadding,
+        maxY: cciMax + cciPadding,
+        lineColor: AppColors.cciLine,
+        oscillatorType: 'cci',
+      ));
+    }
+
+    return Column(children: panels);
+  }
+
+  // 単一オシレーターパネルを構築
+  Widget _buildSingleOscillatorPanel({
+    required String title,
+    required List<double?> values,
+    required double minY,
+    required double maxY,
+    required Color lineColor,
+    required String oscillatorType,
+    List<double?> signalLine = const [],
+    List<double?> histogram = const [],
+  }) {
+    const panelHeight = 100.0;
+
+    return Column(
+      children: [
+        const SizedBox(height: 8),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Y軸ラベル（左側）
+            SizedBox(
+              width: 55,
+              height: panelHeight,
+              child: _buildOscillatorYAxisLabels(minY, maxY),
+            ),
+            // オシレーターチャート
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // タイトル
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4, bottom: 2),
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: lineColor,
+                      ),
+                    ),
+                  ),
+                  // チャート
+                  SizedBox(
+                    height: panelHeight,
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        return CustomPaint(
+                          size: Size(constraints.maxWidth, panelHeight),
+                          painter: OscillatorPainter(
+                            values: values,
+                            minY: minY,
+                            maxY: maxY,
+                            lineColor: lineColor,
+                            oscillatorType: oscillatorType,
+                            signalLine: signalLine,
+                            histogram: histogram,
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // オシレーター用Y軸ラベル
+  Widget _buildOscillatorYAxisLabels(double minY, double maxY) {
+    final range = maxY - minY;
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          maxY.toStringAsFixed(0),
+          style: const TextStyle(fontSize: 9, color: Colors.black, fontWeight: FontWeight.bold),
+        ),
+        Text(
+          ((maxY + minY) / 2).toStringAsFixed(0),
+          style: const TextStyle(fontSize: 9, color: Colors.black, fontWeight: FontWeight.bold),
+        ),
+        Text(
+          minY.toStringAsFixed(0),
+          style: const TextStyle(fontSize: 9, color: Colors.black, fontWeight: FontWeight.bold),
+        ),
+      ],
     );
   }
 
@@ -1959,6 +2321,74 @@ class _DetailScreenState extends State<DetailScreen> {
     } else {
       return price.toStringAsFixed(6);
     }
+  }
+}
+
+// グリッドと枠線を描画するCustomPainter（折れ線チャート用）
+class ChartGridPainter extends CustomPainter {
+  final int dataLength;
+  final int xLabelInterval;
+
+  ChartGridPainter({
+    required this.dataLength,
+    required this.xLabelInterval,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (dataLength == 0) return;
+
+    final dataWidth = size.width / dataLength;
+
+    // グリッド線を描画
+    final gridPaint = Paint()
+      ..color = AppColors.textSecondary.withAlpha(200)
+      ..strokeWidth = 0.5;
+
+    // ダッシュパターン
+    const dashLength = 3.0;
+    const spaceLength = 3.0;
+
+    // 横グリッド線（10分割）
+    for (int i = 0; i <= 10; i++) {
+      final y = size.height * i / 10;
+      double currentX = 0;
+      while (currentX < size.width) {
+        canvas.drawLine(
+          Offset(currentX, y),
+          Offset(min(currentX + dashLength, size.width), y),
+          gridPaint,
+        );
+        currentX += dashLength + spaceLength;
+      }
+    }
+
+    // 縦グリッド線（X軸ラベル位置に合わせる）
+    for (int i = 0; i < dataLength; i += xLabelInterval) {
+      final x = i * dataWidth + dataWidth / 2;
+      double currentY = 0;
+      while (currentY < size.height) {
+        canvas.drawLine(
+          Offset(x, currentY),
+          Offset(x, min(currentY + dashLength, size.height)),
+          gridPaint,
+        );
+        currentY += dashLength + spaceLength;
+      }
+    }
+
+    // チャート全体を囲む枠線を描画
+    final borderPaint = Paint()
+      ..color = AppColors.textSecondary
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), borderPaint);
+  }
+
+  @override
+  bool shouldRepaint(covariant ChartGridPainter oldDelegate) {
+    return oldDelegate.dataLength != dataLength ||
+        oldDelegate.xLabelInterval != xLabelInterval;
   }
 }
 
@@ -2189,6 +2619,171 @@ class CandlestickPainter extends CustomPainter {
   }
 }
 
+// オシレーターを描画するCustomPainter
+class OscillatorPainter extends CustomPainter {
+  final List<double?> values;
+  final double minY;
+  final double maxY;
+  final Color lineColor;
+  final String oscillatorType; // 'rsi', 'macd', 'stochastic', 'cci'
+  final List<double?> signalLine; // MACD用シグナルライン、Stochastic用%D
+  final List<double?> histogram; // MACD用ヒストグラム
+  final int xLabelInterval;
+
+  OscillatorPainter({
+    required this.values,
+    required this.minY,
+    required this.maxY,
+    required this.lineColor,
+    required this.oscillatorType,
+    this.signalLine = const [],
+    this.histogram = const [],
+    this.xLabelInterval = 5,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (values.isEmpty) return;
+
+    final dataWidth = size.width / values.length;
+    final valueRange = maxY - minY;
+
+    // グリッド線を描画
+    final gridPaint = Paint()
+      ..color = AppColors.textSecondary.withAlpha(150)
+      ..strokeWidth = 0.5;
+
+    // 横グリッド線（ダッシュ線）
+    const dashLength = 3.0;
+    const spaceLength = 3.0;
+
+    // レベルラインを描画
+    _drawLevelLines(canvas, size, valueRange, gridPaint);
+
+    // 枠線を描画
+    final borderPaint = Paint()
+      ..color = AppColors.textSecondary
+      ..strokeWidth = 1.0
+      ..style = PaintingStyle.stroke;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), borderPaint);
+
+    // MACDヒストグラムを描画
+    if (oscillatorType == 'macd' && histogram.isNotEmpty) {
+      _drawHistogram(canvas, size, valueRange, dataWidth);
+    }
+
+    // メインラインを描画
+    _drawLine(canvas, size, values, lineColor, valueRange, dataWidth, 1.5);
+
+    // シグナルラインを描画（MACD、Stochastic用）
+    if (signalLine.isNotEmpty) {
+      final signalColor = oscillatorType == 'macd'
+          ? AppColors.macdSignal
+          : AppColors.stochD;
+      _drawLine(canvas, size, signalLine, signalColor, valueRange, dataWidth, 1.0);
+    }
+  }
+
+  void _drawLevelLines(Canvas canvas, Size size, double valueRange, Paint gridPaint) {
+    final levels = <double>[];
+
+    switch (oscillatorType) {
+      case 'rsi':
+        levels.addAll([70, 50, 30]); // 買われすぎ、中央、売られすぎ
+        break;
+      case 'macd':
+        levels.add(0); // ゼロライン
+        break;
+      case 'stochastic':
+        levels.addAll([80, 50, 20]); // 買われすぎ、中央、売られすぎ
+        break;
+      case 'cci':
+        levels.addAll([100, 0, -100]); // +100、ゼロ、-100
+        break;
+    }
+
+    for (final level in levels) {
+      final y = size.height - ((level - minY) / valueRange * size.height);
+      if (y >= 0 && y <= size.height) {
+        // ダッシュ線
+        double currentX = 0;
+        while (currentX < size.width) {
+          canvas.drawLine(
+            Offset(currentX, y),
+            Offset(min(currentX + 3.0, size.width), y),
+            gridPaint,
+          );
+          currentX += 6.0;
+        }
+      }
+    }
+  }
+
+  void _drawHistogram(Canvas canvas, Size size, double valueRange, double dataWidth) {
+    for (int i = 0; i < histogram.length; i++) {
+      if (histogram[i] == null) continue;
+
+      final x = i * dataWidth + dataWidth / 2;
+      final zeroY = size.height - ((0 - minY) / valueRange * size.height);
+      final valueY = size.height - ((histogram[i]! - minY) / valueRange * size.height);
+
+      final isPositive = histogram[i]! >= 0;
+      final color = isPositive ? AppColors.macdHistogramPositive : AppColors.macdHistogramNegative;
+
+      final paint = Paint()
+        ..color = color.withAlpha(150)
+        ..style = PaintingStyle.fill;
+
+      final barWidth = (dataWidth * 0.6).clamp(1.0, 8.0);
+      canvas.drawRect(
+        Rect.fromLTRB(
+          x - barWidth / 2,
+          isPositive ? valueY : zeroY,
+          x + barWidth / 2,
+          isPositive ? zeroY : valueY,
+        ),
+        paint,
+      );
+    }
+  }
+
+  void _drawLine(Canvas canvas, Size size, List<double?> data, Color color, double valueRange, double dataWidth, double strokeWidth) {
+    final paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round;
+
+    final path = Path();
+    bool started = false;
+
+    for (int i = 0; i < data.length; i++) {
+      if (data[i] != null) {
+        final x = i * dataWidth + dataWidth / 2;
+        final y = size.height - ((data[i]! - minY) / valueRange * size.height);
+
+        if (!started) {
+          path.moveTo(x, y);
+          started = true;
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+    }
+
+    canvas.drawPath(path, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant OscillatorPainter oldDelegate) {
+    return oldDelegate.values != values ||
+        oldDelegate.minY != minY ||
+        oldDelegate.maxY != maxY ||
+        oldDelegate.signalLine != signalLine ||
+        oldDelegate.histogram != histogram;
+  }
+}
+
 // インジケーター設定情報クラス
 class _IndicatorConfig {
   final String key;
@@ -2257,8 +2852,8 @@ class _IndicatorSettingsSheetState extends State<_IndicatorSettingsSheet> {
     });
   }
 
-  // 利用可能なインジケーター一覧（ここに追加していく）
-  static final List<_IndicatorConfig> _availableIndicators = [
+  // トレンド系インジケーター（価格チャート上に表示）
+  static final List<_IndicatorConfig> _trendIndicators = [
     _IndicatorConfig(
       key: 'bb',
       name: 'BB',
@@ -2285,18 +2880,58 @@ class _IndicatorSettingsSheetState extends State<_IndicatorSettingsSheet> {
         _ParamConfig(key: 'period3', label: '長期', min: 1, max: 500),
       ],
     ),
-    // 将来追加するインジケーター例
-    // _IndicatorConfig(
-    //   key: 'rsi',
-    //   name: 'RSI',
-    //   fullName: '相対力指数',
-    //   description: '買われすぎ・売られすぎを判定',
-    //   color: Colors.purple,
-    //   icon: Icons.speed,
-    //   params: [
-    //     _ParamConfig(key: 'period', label: '期間', min: 2, max: 50),
-    //   ],
-    // ),
+  ];
+
+  // オシレーター系インジケーター（サブチャートに表示）
+  static final List<_IndicatorConfig> _oscillatorIndicators = [
+    _IndicatorConfig(
+      key: 'rsi',
+      name: 'RSI',
+      fullName: '相対力指数',
+      description: '買われすぎ(70)/売られすぎ(30)',
+      color: AppColors.rsiLine,
+      icon: Icons.trending_up,
+      params: [
+        _ParamConfig(key: 'period', label: '期間', min: 2, max: 50),
+      ],
+    ),
+    _IndicatorConfig(
+      key: 'macd',
+      name: 'MACD',
+      fullName: '移動平均収束拡散',
+      description: 'シグナルラインとのクロス',
+      color: AppColors.macdLine,
+      icon: Icons.bar_chart,
+      params: [
+        _ParamConfig(key: 'fast', label: '短期EMA', min: 2, max: 50),
+        _ParamConfig(key: 'slow', label: '長期EMA', min: 10, max: 100),
+        _ParamConfig(key: 'signal', label: 'シグナル', min: 2, max: 50),
+      ],
+    ),
+    _IndicatorConfig(
+      key: 'stochastic',
+      name: 'Stoch',
+      fullName: 'ストキャスティクス',
+      description: '%K/%Dクロス、80/20レベル',
+      color: AppColors.stochK,
+      icon: Icons.ssid_chart,
+      params: [
+        _ParamConfig(key: 'kPeriod', label: '%K期間', min: 5, max: 50),
+        _ParamConfig(key: 'dPeriod', label: '%D期間', min: 1, max: 10),
+        _ParamConfig(key: 'smooth', label: 'スムース', min: 1, max: 10),
+      ],
+    ),
+    _IndicatorConfig(
+      key: 'cci',
+      name: 'CCI',
+      fullName: '商品チャンネル指数',
+      description: '±100レベルのクロス',
+      color: AppColors.cciLine,
+      icon: Icons.multiline_chart,
+      params: [
+        _ParamConfig(key: 'period', label: '期間', min: 5, max: 50),
+      ],
+    ),
   ];
 
   @override
@@ -2347,99 +2982,164 @@ class _IndicatorSettingsSheetState extends State<_IndicatorSettingsSheet> {
               ),
             ),
             const Divider(height: 1),
-            // インジケーターリスト
+            // インジケーターリスト（セクション分け）
             Expanded(
-              child: ListView.builder(
+              child: ListView(
                 controller: scrollController,
-                itemCount: _availableIndicators.length,
-                itemBuilder: (context, index) {
-                  final config = _availableIndicators[index];
-                  final settings = _localIndicators[config.key];
-                  final isEnabled = settings?.enabled ?? false;
-                  final isExpanded = _expandedKey == config.key;
+                children: [
+                  // トレンド系セクション
+                  _buildSectionHeader(
+                    title: 'トレンド系',
+                    subtitle: '価格チャート上に表示',
+                    icon: Icons.show_chart,
+                    color: AppColors.primary,
+                  ),
+                  ..._trendIndicators.map((config) => _buildIndicatorTile(config)),
 
-                  return Column(
-                    children: [
-                      ListTile(
-                        leading: Container(
-                          width: 40,
-                          height: 40,
-                          decoration: BoxDecoration(
-                            color: config.color.withAlpha(30),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Icon(config.icon, color: config.color),
-                        ),
-                        title: Row(
-                          children: [
-                            Text(
-                              config.name,
-                              style: const TextStyle(fontWeight: FontWeight.bold),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              config.fullName,
-                              style: TextStyle(
-                                color: Colors.grey.shade600,
-                                fontSize: 14,
-                              ),
-                            ),
-                          ],
-                        ),
-                        subtitle: Text(
-                          _getParamSummary(config, settings),
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            // 設定ボタン
-                            if (config.params.isNotEmpty)
-                              IconButton(
-                                icon: Icon(
-                                  isExpanded ? Icons.expand_less : Icons.settings,
-                                  color: Colors.grey,
-                                  size: 20,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _expandedKey = isExpanded ? null : config.key;
-                                  });
-                                },
-                              ),
-                            // スイッチ
-                            Switch(
-                              value: isEnabled,
-                              activeTrackColor: config.color.withAlpha(100),
-                              activeThumbColor: config.color,
-                              onChanged: (value) {
-                                setState(() {
-                                  _localIndicators[config.key]!.enabled = value;
-                                });
-                                widget.onToggle(config.key, value);
-                              },
-                            ),
-                          ],
-                        ),
-                        onTap: () {
-                          final newValue = !isEnabled;
-                          setState(() {
-                            _localIndicators[config.key]!.enabled = newValue;
-                          });
-                          widget.onToggle(config.key, newValue);
-                        },
-                      ),
-                      // パラメータ設定エリア
-                      if (isExpanded && config.params.isNotEmpty)
-                        _buildParamEditor(config, settings),
-                    ],
-                  );
-                },
+                  const SizedBox(height: 8),
+
+                  // オシレーター系セクション
+                  _buildSectionHeader(
+                    title: 'オシレーター系',
+                    subtitle: 'サブチャートに表示',
+                    icon: Icons.ssid_chart,
+                    color: AppColors.rsiLine,
+                  ),
+                  ..._oscillatorIndicators.map((config) => _buildIndicatorTile(config)),
+                ],
               ),
             ),
           ],
         );
       },
+    );
+  }
+
+  // セクションヘッダーを構築
+  Widget _buildSectionHeader({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: color.withAlpha(15),
+        border: Border(
+          bottom: BorderSide(color: color.withAlpha(50), width: 1),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: color, size: 20),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: color,
+                ),
+              ),
+              Text(
+                subtitle,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: color.withAlpha(180),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // インジケータータイルを構築
+  Widget _buildIndicatorTile(_IndicatorConfig config) {
+    final settings = _localIndicators[config.key];
+    final isEnabled = settings?.enabled ?? false;
+    final isExpanded = _expandedKey == config.key;
+
+    return Column(
+      children: [
+        ListTile(
+          leading: Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: config.color.withAlpha(30),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(config.icon, color: config.color),
+          ),
+          title: Row(
+            children: [
+              Text(
+                config.name,
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                config.fullName,
+                style: TextStyle(
+                  color: Colors.grey.shade600,
+                  fontSize: 14,
+                ),
+              ),
+            ],
+          ),
+          subtitle: Text(
+            _getParamSummary(config, settings),
+            style: const TextStyle(fontSize: 12),
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 設定ボタン
+              if (config.params.isNotEmpty)
+                IconButton(
+                  icon: Icon(
+                    isExpanded ? Icons.expand_less : Icons.settings,
+                    color: Colors.grey,
+                    size: 20,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _expandedKey = isExpanded ? null : config.key;
+                    });
+                  },
+                ),
+              // スイッチ
+              Switch(
+                value: isEnabled,
+                activeTrackColor: config.color.withAlpha(100),
+                activeThumbColor: config.color,
+                onChanged: (value) {
+                  setState(() {
+                    _localIndicators[config.key]!.enabled = value;
+                  });
+                  widget.onToggle(config.key, value);
+                },
+              ),
+            ],
+          ),
+          onTap: () {
+            final newValue = !isEnabled;
+            setState(() {
+              _localIndicators[config.key]!.enabled = newValue;
+            });
+            widget.onToggle(config.key, newValue);
+          },
+        ),
+        // パラメータ設定エリア
+        if (isExpanded && config.params.isNotEmpty)
+          _buildParamEditor(config, settings),
+      ],
     );
   }
 
@@ -2457,6 +3157,22 @@ class _IndicatorSettingsSheetState extends State<_IndicatorSettingsSheet> {
         final p2 = settings.params['period2'] ?? 25;
         final p3 = settings.params['period3'] ?? 50;
         return 'EMA($p1), EMA($p2), EMA($p3)';
+      case 'rsi':
+        final period = settings.params['period'] ?? 14;
+        return '期間: $period, レベル: 70/30';
+      case 'macd':
+        final fast = settings.params['fast'] ?? 12;
+        final slow = settings.params['slow'] ?? 26;
+        final signal = settings.params['signal'] ?? 9;
+        return 'MACD($fast, $slow, $signal)';
+      case 'stochastic':
+        final k = settings.params['kPeriod'] ?? 14;
+        final d = settings.params['dPeriod'] ?? 3;
+        final smooth = settings.params['smooth'] ?? 3;
+        return '%K($k), %D($d), Smooth($smooth)';
+      case 'cci':
+        final period = settings.params['period'] ?? 20;
+        return '期間: $period, レベル: ±100';
       default:
         return config.description;
     }

@@ -52,6 +52,28 @@ class AppColors {
   static const Color emaMedium = Color(0xFF3182CE); // ミディアムブルー
   static const Color emaLong = Color(0xFF2C5282); // ダークブルー
 
+  // RSI
+  static const Color rsiLine = Color(0xFF805AD5); // パープル
+  static const Color rsiOverbought = Color(0xFFE53E3E); // レッド（買われすぎ）
+  static const Color rsiOversold = Color(0xFF38A169); // グリーン（売られすぎ）
+
+  // MACD
+  static const Color macdLine = Color(0xFF3182CE); // ブルー
+  static const Color macdSignal = Color(0xFFED8936); // オレンジ
+  static const Color macdHistogramPositive = Color(0xFF38A169); // グリーン
+  static const Color macdHistogramNegative = Color(0xFFE53E3E); // レッド
+
+  // ストキャスティクス
+  static const Color stochK = Color(0xFF4299E1); // ライトブルー（%K）
+  static const Color stochD = Color(0xFFED8936); // オレンジ（%D）
+  static const Color stochOverbought = Color(0xFFE53E3E); // レッド（買われすぎ80）
+  static const Color stochOversold = Color(0xFF38A169); // グリーン（売られすぎ20）
+
+  // CCI
+  static const Color cciLine = Color(0xFF9F7AEA); // ライトパープル
+  static const Color cciUpperLevel = Color(0xFFE53E3E); // レッド（+100）
+  static const Color cciLowerLevel = Color(0xFF38A169); // グリーン（-100）
+
   // フィードバックカラー
   static const Color success = Color(0xFF276749); // フォレストグリーン
   static const Color error = Color(0xFFC53030); // プロフェッショナルレッド
