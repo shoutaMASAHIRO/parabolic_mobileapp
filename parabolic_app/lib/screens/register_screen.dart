@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../theme/app_colors.dart';
 import 'home_screen.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -42,7 +43,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('登録が完了しました'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.success,
           ),
         );
         Navigator.of(context).pushAndRemoveUntil(
@@ -75,12 +76,12 @@ class _RegisterScreenState extends State<RegisterScreen> {
                         margin: const EdgeInsets.only(bottom: 16),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.red.shade50,
+                          color: AppColors.errorLight,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
                           auth.errorMessage!,
-                          style: TextStyle(color: Colors.red.shade700),
+                          style: const TextStyle(color: AppColors.error),
                         ),
                       );
                     }

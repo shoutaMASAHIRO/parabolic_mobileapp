@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:intl/intl.dart';
@@ -7,6 +8,7 @@ import '../models/candle.dart';
 import '../providers/auth_provider.dart';
 import '../services/chart_service.dart';
 import '../services/cross_detection_service.dart';
+import '../theme/app_colors.dart';
 import 'memo_screen.dart';
 import 'home_screen.dart' show MarketCategory;
 
@@ -50,6 +52,7 @@ class _DetailScreenState extends State<DetailScreen> {
   List<Candle> _candles = [];
   bool _isLoading = true;
   String? _error;
+  bool _isFetchingOlderData = false;
   String _interval = '1d';
   ChartType _chartType = ChartType.line;
 
@@ -345,6 +348,58 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+  // 無限スクロールで過去のデータを取得
+  Future<void> _fetchOlderData() async {
+    if (_isFetchingOlderData || _candles.isEmpty) return;
+
+    setState(() {
+      _isFetchingOlderData = true;
+    });
+
+    try {
+      final String toTimestamp = _candles.first.date.toIso8601String();
+      final olderCandles = await _chartService.getChartData(
+        widget.symbol,
+        interval: _interval,
+        to: toTimestamp,
+      );
+
+      if (olderCandles.isNotEmpty && mounted) {
+        // 安全装置: 取得したデータが本当に古いデータであることを確認
+        // 取得したデータの最後のキャンドルの日付が、既存の最も古いキャンドルの日付より前であること
+        if (olderCandles.last.date.isBefore(_candles.first.date)) {
+          setState(() {
+            final newCandlesCount = olderCandles.length;
+            final oldTotalDataPoints = _candles.length.toDouble();
+
+            _candles.insertAll(0, olderCandles);
+
+            // 表示がジャンプしないようにスクロール位置を調整
+            final newTotalDataPoints = _candles.length.toDouble();
+            final visibleDataPoints = (oldTotalDataPoints / _chartZoom).round();
+            final newMaxPanOffset = newTotalDataPoints - visibleDataPoints;
+
+            if (newMaxPanOffset > 0) {
+              final newPanOffsetInPoints = newCandlesCount.toDouble();
+              _chartPanOffsetX = (newPanOffsetInPoints / newMaxPanOffset).clamp(0.0, 1.0);
+            }
+          });
+        } else {
+          // 取得したデータが古くない場合（バックエンドのtoパラメータが機能していない可能性）
+          debugPrint("Infinite scroll: Fetched data is not older than existing data. Backend may not be handling the 'to' parameter correctly or no older data is available.");
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch older chart data: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isFetchingOlderData = false;
+        });
+      }
+    }
+  }
+
   // インジケーター設定をサーバーに同期
   Future<void> _syncIndicatorSettingsToServer() async {
     await _chartService.saveIndicatorSettingsToServer(
@@ -369,11 +424,11 @@ class _DetailScreenState extends State<DetailScreen> {
   Color _getCategoryColor() {
     switch (widget.category) {
       case MarketCategory.crypto:
-        return Colors.orange;
+        return AppColors.cryptoPrimary;
       case MarketCategory.forex:
-        return Colors.green;
+        return AppColors.forexPrimary;
       case MarketCategory.stock:
-        return Colors.blue;
+        return AppColors.stockPrimary;
     }
   }
 
@@ -383,10 +438,10 @@ class _DetailScreenState extends State<DetailScreen> {
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
         color: _isRefreshing
-            ? Colors.blue
+            ? AppColors.info
             : _secondsUntilRefresh <= 10
-                ? Colors.orange
-                : Colors.green,
+                ? AppColors.warning
+                : AppColors.success,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Row(
@@ -457,8 +512,8 @@ class _DetailScreenState extends State<DetailScreen> {
                   top: 6,
                   child: Container(
                     padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                      color: Colors.blue,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
                       shape: BoxShape.circle,
                     ),
                     child: Text(
@@ -486,7 +541,7 @@ class _DetailScreenState extends State<DetailScreen> {
                       width: 8,
                       height: 8,
                       decoration: const BoxDecoration(
-                        color: Colors.red,
+                        color: AppColors.error,
                         shape: BoxShape.circle,
                       ),
                     ),
@@ -599,7 +654,7 @@ class _DetailScreenState extends State<DetailScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const Icon(Icons.error_outline, size: 48, color: AppColors.error),
             const SizedBox(height: 16),
             Text(_error!, textAlign: TextAlign.center),
             const SizedBox(height: 16),
@@ -623,7 +678,7 @@ class _DetailScreenState extends State<DetailScreen> {
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // 銘柄情報とタイマー
               _buildSymbolHeader(),
@@ -922,7 +977,7 @@ class _DetailScreenState extends State<DetailScreen> {
           name: 'BB',
           fullName: 'ボリンジャーバンド',
           description: '±1σ, ±2σのバンドを表示',
-          color: Colors.blue,
+          color: AppColors.bbMiddle,
           icon: Icons.stacked_line_chart,
         );
       case 'ema':
@@ -931,7 +986,7 @@ class _DetailScreenState extends State<DetailScreen> {
           name: 'EMA',
           fullName: '指数移動平均',
           description: 'EMA(10), EMA(25), EMA(50)',
-          color: Colors.orange,
+          color: AppColors.emaMedium,
           icon: Icons.show_chart,
         );
       default:
@@ -940,7 +995,7 @@ class _DetailScreenState extends State<DetailScreen> {
           name: key.toUpperCase(),
           fullName: key,
           description: '',
-          color: Colors.grey,
+          color: AppColors.textSecondary,
           icon: Icons.analytics,
         );
     }
@@ -982,7 +1037,7 @@ class _DetailScreenState extends State<DetailScreen> {
           children: [
             Icon(
               isPositive ? Icons.arrow_upward : Icons.arrow_downward,
-              color: isPositive ? Colors.green : Colors.red,
+              color: isPositive ? AppColors.bullish : AppColors.bearish,
               size: 20,
             ),
             const SizedBox(width: 4),
@@ -990,7 +1045,7 @@ class _DetailScreenState extends State<DetailScreen> {
               priceChangeStr,
               style: TextStyle(
                 fontSize: 16,
-                color: isPositive ? Colors.green : Colors.red,
+                color: isPositive ? AppColors.bullish : AppColors.bearish,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -1020,21 +1075,43 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Widget _buildLineChart(List<Candle> candles) {
-    final closePrices = candles.map((c) => c.close).toList();
+    // インジケーターの最大期間を計算
+    int maxPeriod = 0;
+    if (_showBB) {
+      maxPeriod = max(maxPeriod, _bbPeriod);
+    }
+    if (_showEMA) {
+      maxPeriod = max(maxPeriod, _emaPeriod1);
+      maxPeriod = max(maxPeriod, _emaPeriod2);
+      maxPeriod = max(maxPeriod, _emaPeriod3);
+    }
+    final int startOffset = (maxPeriod > 0) ? maxPeriod - 1 : 0;
 
-    final spots = candles.asMap().entries.map((entry) {
+    // 描画対象のローソク足リスト（ウォームアップ期間を削除）
+    final displayCandles = (startOffset > 0 && candles.length > startOffset)
+        ? candles.sublist(startOffset)
+        : candles;
+
+    if (displayCandles.isEmpty) {
+      return const SizedBox(
+        height: 300,
+        child: Center(child: Text('インジケーター計算後のデータが不足しています')),
+      );
+    }
+
+    // 描画対象のデータでスポットを生成
+    final spots = displayCandles.asMap().entries.map((entry) {
       return FlSpot(entry.key.toDouble(), entry.value.close);
     }).toList();
 
-    final minY = candles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
-    final maxY = candles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
+    final minY = displayCandles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
+    final maxY = displayCandles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
 
-    final isPositive = candles.last.close >= candles.first.close;
-    final chartColor = isPositive ? Colors.green : Colors.red;
+    final isPositive = displayCandles.last.close >= displayCandles.first.close;
+    final chartColor = isPositive ? AppColors.bullish : AppColors.bearish;
 
-    // インジケーターデータを準備
+    // メインの価格ライン
     final lineBars = <LineChartBarData>[
-      // メインの価格ライン
       LineChartBarData(
         spots: spots,
         isCurved: true,
@@ -1049,25 +1126,49 @@ class _DetailScreenState extends State<DetailScreen> {
         ),
       ),
     ];
+    
+    // インジケーターは元の完全なリストから計算
+    final fullClosePrices = candles.map((c) => c.close).toList();
 
     // ボリンジャーバンド
     if (_showBB) {
       final bb = TechnicalIndicators.calculateBollingerBands(
-        closePrices,
+        fullClosePrices,
         period: _bbPeriod,
         stdDev1: _bbStdDev1,
         stdDev2: _bbStdDev2,
       );
-      lineBars.addAll(_createBBLines(bb, candles.length));
+      // BB: 内側から紫、ピンク、濃い目のピンク（透明度0.6、線幅変更）
+      final bbMiddleColor = Colors.pink.shade700.withOpacity(0.6); // 濃い目のピンク
+      final bb1SigmaColor = Colors.purple.withOpacity(0.6); // 紫
+      final bb2SigmaColor = Colors.pink.withOpacity(0.6); // ピンク
+
+      lineBars.add(_createIndicatorLine(bb.middle.sublist(startOffset), displayCandles.length, bbMiddleColor, 1.0)); // 線幅1.0
+      lineBars.add(_createIndicatorLine(bb.upper1.sublist(startOffset), displayCandles.length, bb1SigmaColor, 0.75)); // 線幅0.75
+      lineBars.add(_createIndicatorLine(bb.lower1.sublist(startOffset), displayCandles.length, bb1SigmaColor, 0.75)); // 線幅0.75
+      lineBars.add(_createIndicatorLine(bb.upper2.sublist(startOffset), displayCandles.length, bb2SigmaColor, 0.75)); // 線幅0.75
+      lineBars.add(_createIndicatorLine(bb.lower2.sublist(startOffset), displayCandles.length, bb2SigmaColor, 0.75)); // 線幅0.75
     }
 
     // EMA
     if (_showEMA) {
-      lineBars.addAll(_createEMALines(closePrices, candles.length));
+      // EMA: 短いものから青（深め）、水色（明るめ）、緑（透明度0.6、線幅1.0）
+      final emaShortColor = Colors.blue.shade800.withOpacity(0.6); // 青を深めに
+      final emaMediumColor = Colors.lightBlue.shade300.withOpacity(0.6); // 水色を明るめに
+      final emaLongColor = Colors.green.withOpacity(0.6);
+      
+      final ema1 = TechnicalIndicators.calculateEMA(fullClosePrices, _emaPeriod1);
+      lineBars.add(_createIndicatorLine(ema1.sublist(startOffset), displayCandles.length, emaShortColor, 1.0)); // 線幅1.0
+
+      final ema2 = TechnicalIndicators.calculateEMA(fullClosePrices, _emaPeriod2);
+      lineBars.add(_createIndicatorLine(ema2.sublist(startOffset), displayCandles.length, emaMediumColor, 1.0)); // 線幅1.0
+
+      final ema3 = TechnicalIndicators.calculateEMA(fullClosePrices, _emaPeriod3);
+      lineBars.add(_createIndicatorLine(ema3.sublist(startOffset), displayCandles.length, emaLongColor, 1.0)); // 線幅1.0
     }
 
-    // ズーム・パンに基づいて表示範囲を計算
-    final totalDataPoints = candles.length.toDouble();
+    // ズーム・パンは描画対象のリスト基準で計算
+    final totalDataPoints = displayCandles.length.toDouble();
     final visibleDataPoints = totalDataPoints / _chartZoom;
     final maxPanOffset = totalDataPoints - visibleDataPoints;
     final panOffset = (_chartPanOffsetX * maxPanOffset).clamp(0.0, maxPanOffset);
@@ -1075,9 +1176,9 @@ class _DetailScreenState extends State<DetailScreen> {
     final visibleMaxX = panOffset + visibleDataPoints - 1;
 
     // 表示範囲内のデータでY軸の範囲を再計算
-    final visibleStartIdx = visibleMinX.floor().clamp(0, candles.length - 1);
-    final visibleEndIdx = visibleMaxX.ceil().clamp(0, candles.length - 1);
-    final visibleCandles = candles.sublist(visibleStartIdx, visibleEndIdx + 1);
+    final visibleStartIdx = visibleMinX.floor().clamp(0, displayCandles.length - 1);
+    final visibleEndIdx = visibleMaxX.ceil().clamp(0, displayCandles.length - 1);
+    final visibleCandles = displayCandles.sublist(visibleStartIdx, visibleEndIdx + 1);
 
     double visibleMinY = minY;
     double visibleMaxY = maxY;
@@ -1096,50 +1197,62 @@ class _DetailScreenState extends State<DetailScreen> {
     // X軸ラベル間隔を計算（重複防止）
     final xLabelInterval = _calculateXLabelInterval(visibleCandles.length);
 
-    return Column(
-      children: [
-        // ズームコントロール（コンパクト）
-        _buildCompactZoomControls(),
-        // チャート本体（軸ラベル付き）
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Y軸ラベル（左側）
-            SizedBox(
-              width: 55,
-              height: 300,
-              child: _buildYAxisLabels(adjustedMinY, adjustedMaxY),
-            ),
-            // メインチャート
-            Expanded(
-              child: Column(
-                children: [
-                  _buildInteractiveChartWrapper(
-                    chartHeight: 300,
-                    visibleCandles: visibleCandles,
-                    visibleStartIdx: visibleStartIdx,
-                    child: LineChart(
+    return SizedBox(
+      width: double.infinity,
+      child: Column(
+        children: [
+          // ズームコントロール（コンパクト）
+          _buildCompactZoomControls(),
+          // チャート本体（軸ラベル付き）
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Y軸ラベル（左側）
+              SizedBox(
+                width: 55,
+                height: 300,
+                child: _buildYAxisLabels(adjustedMinY, adjustedMaxY),
+              ),
+              // メインチャート
+              Expanded(
+                child: Column(
+                  children: [
+                    _buildInteractiveChartWrapper(
+                      chartHeight: 300,
+                      visibleCandles: visibleCandles,
+                      visibleStartIdx: visibleStartIdx,
+                      child: LineChart(
                         LineChartData(
                           gridData: FlGridData(
                             show: true,
                             drawVerticalLine: true,
-                            horizontalInterval: (adjustedMaxY - adjustedMinY) / 5,
+                            horizontalInterval: (adjustedMaxY - adjustedMinY) / 10,
                             verticalInterval: xLabelInterval.toDouble(),
                             getDrawingHorizontalLine: (value) {
                               return FlLine(
-                                color: Colors.grey.shade800,
+                                color: AppColors.textSecondary.withOpacity(0.8),
                                 strokeWidth: 0.5,
+                                dashArray: [3, 3],
                               );
                             },
                             getDrawingVerticalLine: (value) {
                               return FlLine(
-                                color: Colors.grey.shade800,
+                                color: AppColors.textSecondary.withOpacity(0.8),
                                 strokeWidth: 0.5,
+                                dashArray: [3, 3],
                               );
                             },
                           ),
                           titlesData: const FlTitlesData(show: false),
-                          borderData: FlBorderData(show: false),
+                          borderData: FlBorderData(
+                            show: true,
+                            border: const Border(
+                              left: BorderSide(color: AppColors.textSecondary, width: 1.5),
+                              top: BorderSide(color: AppColors.textSecondary, width: 1.5),
+                              right: BorderSide(color: AppColors.textSecondary, width: 1.5),
+                              bottom: BorderSide(color: AppColors.textSecondary, width: 1.5),
+                            ),
+                          ),
                           minX: visibleMinX,
                           maxX: visibleMaxX,
                           minY: adjustedMinY,
@@ -1151,9 +1264,9 @@ class _DetailScreenState extends State<DetailScreen> {
                               getTooltipItems: (touchedSpots) {
                                 return touchedSpots.map((spot) {
                                   final index = spot.x.toInt();
-                                  if (index < 0 || index >= candles.length) return null;
+                                  if (index < 0 || index >= displayCandles.length) return null;
                                   if (spot.barIndex != 0) return null;
-                                  final candle = candles[index];
+                                  final candle = displayCandles[index];
                                   return LineTooltipItem(
                                     '${DateFormat('yyyy/MM/dd').format(candle.date)}\n${_formatPriceWithCurrency(candle.close)}',
                                     const TextStyle(color: Colors.white),
@@ -1163,22 +1276,23 @@ class _DetailScreenState extends State<DetailScreen> {
                             ),
                           ),
                         ),
+                      ),
                     ),
-                  ),
-                  // X軸ラベル（下側）
-                  SizedBox(
-                    height: 30,
-                    child: _buildXAxisLabels(visibleCandles, xLabelInterval),
-                  ),
-                ],
+                    // X軸ラベル（下側）
+                    SizedBox(
+                      height: 30,
+                      child: _buildXAxisLabels(visibleCandles, xLabelInterval),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
-        ),
-        // クロスヘア情報表示
-        if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length)
-          _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
-      ],
+            ],
+          ),
+          // クロスヘア情報表示
+          if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length)
+            _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
+        ],
+      ),
     );
   }
 
@@ -1190,6 +1304,7 @@ class _DetailScreenState extends State<DetailScreen> {
     required Widget child,
   }) {
     return GestureDetector(
+      onVerticalDragStart: (details) {}, // これを追加してジェスチャーの競合を解決
       onScaleStart: (details) {
         _lastScaleStart = _chartZoom;
         _lastFocalPoint = details.focalPoint;
@@ -1206,6 +1321,13 @@ class _DetailScreenState extends State<DetailScreen> {
             final sensitivity = 1.5 / _chartZoom; // ズーム時は感度を上げる
             final deltaX = details.focalPointDelta.dx / 150 * sensitivity;
             final deltaY = details.focalPointDelta.dy / 120 * sensitivity;
+
+            // 左端でさらに左にドラッグした場合、過去データを読み込む
+            // focalPointDelta.dx > 0 は、指を左から右に動かした（チャートを左に動かした）場合
+            if (_chartPanOffsetX == 0.0 && details.focalPointDelta.dx > 5.0) {
+              _fetchOlderData();
+            }
+
             _chartPanOffsetX = (_chartPanOffsetX - deltaX).clamp(0.0, (1.0 - (1.0 / _chartZoom)).clamp(0.0, 1.0));
             _chartPanOffsetY = (_chartPanOffsetY + deltaY).clamp(-1.5, 1.5);
           }
@@ -1245,26 +1367,49 @@ class _DetailScreenState extends State<DetailScreen> {
           _crosshairIndex = null;
         });
       },
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
-        child: Container(
-          decoration: const BoxDecoration(
-            color: Colors.black,
-          ),
-          child: Stack(
-            children: [
-              SizedBox(height: chartHeight, child: child),
-              // クロスヘアオーバーレイ
-              if (_showCrosshair && _crosshairPosition != null)
-                Positioned.fill(
-                  child: CustomPaint(
-                    painter: CrosshairPainter(
-                      position: _crosshairPosition!,
-                      color: Colors.white54,
+      child: SizedBox(
+        height: chartHeight,
+        child: ClipRect(
+          child: Container(
+            decoration: const BoxDecoration(
+              color: AppColors.chartBackground,
+            ),
+            child: Stack(
+              children: [
+                child,
+                // クロスヘアオーバーレイ
+                if (_showCrosshair && _crosshairPosition != null)
+                  Positioned.fill(
+                    child: CustomPaint(
+                      painter: CrosshairPainter(
+                        position: _crosshairPosition!,
+                        color: AppColors.axisLabel.withOpacity(0.7),
+                      ),
                     ),
                   ),
-                ),
-            ],
+                // 過去データ読み込みインジケーター
+                if (_isFetchingOlderData)
+                  Positioned(
+                    left: 16,
+                    top: 16,
+                    child: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1382,12 +1527,16 @@ class _DetailScreenState extends State<DetailScreen> {
   List<LineChartBarData> _createBBLines(BollingerBandsResult bb, int length) {
     final lines = <LineChartBarData>[];
 
-    // BB: グレー系で統一（ローソク足と区別しやすく）
-    lines.add(_createIndicatorLine(bb.middle, length, Colors.white70, 1.5));
-    lines.add(_createIndicatorLine(bb.upper1, length, Colors.grey.shade500, 1.0));
-    lines.add(_createIndicatorLine(bb.lower1, length, Colors.grey.shade500, 1.0));
-    lines.add(_createIndicatorLine(bb.upper2, length, Colors.grey.shade600, 1.0));
-    lines.add(_createIndicatorLine(bb.lower2, length, Colors.grey.shade600, 1.0));
+    // BB: 内側から紫、ピンク、濃い目のピンク
+    final bbMiddleColor = Colors.pink.shade700.withOpacity(0.6); // 濃い目のピンク
+    final bb1SigmaColor = Colors.purple.withOpacity(0.6); // 紫
+    final bb2SigmaColor = Colors.pink.withOpacity(0.6); // ピンク
+
+    lines.add(_createIndicatorLine(bb.middle, length, bbMiddleColor, 1.0));
+    lines.add(_createIndicatorLine(bb.upper1, length, bb1SigmaColor, 0.75));
+    lines.add(_createIndicatorLine(bb.lower1, length, bb1SigmaColor, 0.75));
+    lines.add(_createIndicatorLine(bb.upper2, length, bb2SigmaColor, 0.75));
+    lines.add(_createIndicatorLine(bb.lower2, length, bb2SigmaColor, 0.75));
 
     return lines;
   }
@@ -1395,15 +1544,19 @@ class _DetailScreenState extends State<DetailScreen> {
   List<LineChartBarData> _createEMALines(List<double> prices, int length) {
     final lines = <LineChartBarData>[];
 
-    // EMA: オレンジ系で統一
+    // EMA: 短いものから青（深め）、水色（明るめ）、緑
+    final emaShortColor = Colors.blue.shade800.withOpacity(0.6); // 青を深めに
+    final emaMediumColor = Colors.lightBlue.shade300.withOpacity(0.6); // 水色を明るめに
+    final emaLongColor = Colors.green.withOpacity(0.6);
+    
     final ema1 = TechnicalIndicators.calculateEMA(prices, _emaPeriod1);
-    lines.add(_createIndicatorLine(ema1, length, Colors.orange.shade300, 1.5));
+    lines.add(_createIndicatorLine(ema1, length, emaShortColor, 1.0));
 
     final ema2 = TechnicalIndicators.calculateEMA(prices, _emaPeriod2);
-    lines.add(_createIndicatorLine(ema2, length, Colors.orange, 1.5));
+    lines.add(_createIndicatorLine(ema2, length, emaMediumColor, 1.0));
 
     final ema3 = TechnicalIndicators.calculateEMA(prices, _emaPeriod3);
-    lines.add(_createIndicatorLine(ema3, length, Colors.orange.shade700, 1.5));
+    lines.add(_createIndicatorLine(ema3, length, emaLongColor, 1.0));
 
     return lines;
   }
@@ -1429,21 +1582,44 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   Widget _buildCandlestickChart(List<Candle> candles) {
-    final closePrices = candles.map((c) => c.close).toList();
+    // 指標の最大期間を計算
+    int maxPeriod = 0;
+    if (_showBB) {
+      maxPeriod = max(maxPeriod, _bbPeriod);
+    }
+    if (_showEMA) {
+      maxPeriod = max(maxPeriod, _emaPeriod1);
+      maxPeriod = max(maxPeriod, _emaPeriod2);
+      maxPeriod = max(maxPeriod, _emaPeriod3);
+    }
+    final int startOffset = (maxPeriod > 0) ? maxPeriod - 1 : 0;
 
-    final minY = candles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
-    final maxY = candles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
+    // 描画対象のローソク足リスト（インジケーターのウォームアップ期間を削除）
+    final displayCandles = (startOffset > 0 && candles.length > startOffset)
+        ? candles.sublist(startOffset)
+        : candles;
 
-    // ズーム・パンに基づいて表示範囲を計算
-    final totalDataPoints = candles.length.toDouble();
+    if (displayCandles.isEmpty) {
+      return const SizedBox(
+        height: 300,
+        child: Center(child: Text('インジケーター計算後のデータが不足しています')),
+      );
+    }
+
+    // Y軸の範囲は表示対象のキャンドルから計算
+    final minY = displayCandles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
+    final maxY = displayCandles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
+
+    // ズーム・パンは表示対象のキャンドルリストに対して行う
+    final totalDataPoints = displayCandles.length.toDouble();
     final visibleDataPoints = (totalDataPoints / _chartZoom).round();
-    final maxPanOffset = candles.length - visibleDataPoints;
+    final maxPanOffset = displayCandles.length - visibleDataPoints;
     final panOffset = (_chartPanOffsetX * maxPanOffset).round().clamp(0, maxPanOffset);
     final visibleStartIdx = panOffset;
-    final visibleEndIdx = (panOffset + visibleDataPoints).clamp(0, candles.length);
-    final visibleCandles = candles.sublist(visibleStartIdx, visibleEndIdx);
+    final visibleEndIdx = (panOffset + visibleDataPoints).clamp(0, displayCandles.length);
+    final visibleCandles = displayCandles.sublist(visibleStartIdx, visibleEndIdx);
 
-    // 表示範囲内のY軸範囲を計算
+    // 表示範囲内のY軸範囲を再計算
     double visibleMinY = minY;
     double visibleMaxY = maxY;
     if (visibleCandles.isNotEmpty) {
@@ -1457,116 +1633,128 @@ class _DetailScreenState extends State<DetailScreen> {
     final yPanAmount = yRange * _chartPanOffsetY * 0.5;
     final adjustedMinY = visibleMinY - visiblePadding + yPanAmount;
     final adjustedMaxY = visibleMaxY + visiblePadding + yPanAmount;
-
-    // インジケーターを計算（表示範囲用にスライス）
+    
+    // インジケーターは元の完全なリストから計算
+    final fullClosePrices = candles.map((c) => c.close).toList();
     BollingerBandsResult? visibleBB;
     List<List<double?>>? visibleEmaLines;
-
+    
+    // 表示範囲のインデックスを元のリストのインデックスに変換
+    final originalListVisibleStartIdx = visibleStartIdx + startOffset;
+    final originalListVisibleEndIdx = visibleEndIdx + startOffset;
+    
     if (_showBB) {
       final fullBB = TechnicalIndicators.calculateBollingerBands(
-        closePrices,
+        fullClosePrices,
         period: _bbPeriod,
         stdDev1: _bbStdDev1,
         stdDev2: _bbStdDev2,
       );
-      // 表示範囲にスライス
+      // 正しい範囲でスライス
       visibleBB = BollingerBandsResult(
-        middle: fullBB.middle.sublist(visibleStartIdx, visibleEndIdx),
-        upper1: fullBB.upper1.sublist(visibleStartIdx, visibleEndIdx),
-        lower1: fullBB.lower1.sublist(visibleStartIdx, visibleEndIdx),
-        upper2: fullBB.upper2.sublist(visibleStartIdx, visibleEndIdx),
-        lower2: fullBB.lower2.sublist(visibleStartIdx, visibleEndIdx),
+        middle: fullBB.middle.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
+        upper1: fullBB.upper1.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
+        lower1: fullBB.lower1.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
+        upper2: fullBB.upper2.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
+        lower2: fullBB.lower2.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
       );
     }
     if (_showEMA) {
-      final fullEma1 = TechnicalIndicators.calculateEMA(closePrices, _emaPeriod1);
-      final fullEma2 = TechnicalIndicators.calculateEMA(closePrices, _emaPeriod2);
-      final fullEma3 = TechnicalIndicators.calculateEMA(closePrices, _emaPeriod3);
-      // 表示範囲にスライス
+      final fullEma1 = TechnicalIndicators.calculateEMA(fullClosePrices, _emaPeriod1);
+      final fullEma2 = TechnicalIndicators.calculateEMA(fullClosePrices, _emaPeriod2);
+      final fullEma3 = TechnicalIndicators.calculateEMA(fullClosePrices, _emaPeriod3);
+      // 正しい範囲でスライス
       visibleEmaLines = [
-        fullEma1.sublist(visibleStartIdx, visibleEndIdx),
-        fullEma2.sublist(visibleStartIdx, visibleEndIdx),
-        fullEma3.sublist(visibleStartIdx, visibleEndIdx),
+        fullEma1.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
+        fullEma2.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
+        fullEma3.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
       ];
     }
-
-    // X軸ラベル間隔を計算（重複防止）
+    
+    // X軸ラベル間隔を計算
     final xLabelInterval = _calculateXLabelInterval(visibleCandles.length);
 
-    return Column(
-      children: [
-        // ズームコントロール（コンパクト）
-        _buildCompactZoomControls(),
-        // チャート本体（軸ラベル付き）
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Y軸ラベル（左側）
-            SizedBox(
-              width: 55,
-              height: 300,
-              child: _buildYAxisLabels(adjustedMinY, adjustedMaxY),
-            ),
-            // メインチャート
-            Expanded(
-              child: Column(
-                children: [
-                  _buildInteractiveChartWrapper(
-                    chartHeight: 300,
-                    visibleCandles: visibleCandles,
-                    visibleStartIdx: visibleStartIdx,
-                    child: LayoutBuilder(
-                      builder: (context, constraints) {
-                        return CustomPaint(
-                          size: Size(constraints.maxWidth, 300),
-                          painter: CandlestickPainter(
-                            candles: visibleCandles,
-                            minY: adjustedMinY,
-                            maxY: adjustedMaxY,
-                            bb: visibleBB,
-                            emaLines: visibleEmaLines,
-                            startIndex: visibleStartIdx,
-                            totalLength: candles.length,
-                            xLabelInterval: xLabelInterval,
-                            interval: _interval,
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  // X軸ラベル（下側）
-                  SizedBox(
-                    height: 30,
-                    child: _buildXAxisLabels(visibleCandles, xLabelInterval),
-                  ),
-                ],
+    // CustomPainterに渡すデータは既にトリミングされているため、インジケーター開始インデックスは0
+    const int indicatorStartIndex = 0;
+
+    return SizedBox(
+      width: double.infinity,
+      child: Column(
+        children: [
+          // ズームコントロール（コンパクト）
+          _buildCompactZoomControls(),
+          // チャート本体（軸ラベル付き）
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Y軸ラベル（左側）
+              SizedBox(
+                width: 55,
+                height: 300,
+                child: _buildYAxisLabels(adjustedMinY, adjustedMaxY),
               ),
-            ),
-          ],
-        ),
-        // クロスヘア情報表示
-        if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length)
-          _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
-      ],
+              // メインチャート
+              Expanded(
+                child: Column(
+                  children: [
+                    _buildInteractiveChartWrapper(
+                      chartHeight: 300,
+                      visibleCandles: visibleCandles,
+                      visibleStartIdx: visibleStartIdx,
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          return CustomPaint(
+                            size: Size(constraints.maxWidth, 300),
+                            painter: CandlestickPainter(
+                              candles: visibleCandles,
+                              minY: adjustedMinY,
+                              maxY: adjustedMaxY,
+                              bb: visibleBB,
+                              emaLines: visibleEmaLines,
+                              startIndex: visibleStartIdx,
+                              totalLength: candles.length,
+                              xLabelInterval: xLabelInterval,
+                              interval: _interval,
+                              indicatorStartIndex: indicatorStartIndex,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    // X軸ラベル（下側）
+                    SizedBox(
+                      height: 30,
+                      child: _buildXAxisLabels(visibleCandles, xLabelInterval),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          // クロスヘア情報表示
+          if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length)
+            _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
+        ],
+      ),
     );
   }
 
   // X軸ラベル間隔を計算（重複防止）
   int _calculateXLabelInterval(int dataPoints) {
-    if (dataPoints <= 5) return 1;
-    if (dataPoints <= 15) return 3;
-    if (dataPoints <= 30) return 5;
-    if (dataPoints <= 60) return 10;
-    if (dataPoints <= 120) return 20;
-    return (dataPoints / 5).ceil();
+    if (dataPoints <= 10) return 1;
+    if (dataPoints <= 30) return 3;
+    if (dataPoints <= 60) return 5;
+    if (dataPoints <= 120) return 10;
+    if (dataPoints <= 240) return 20;
+    return (dataPoints / 10).ceil();
   }
 
   // Y軸ラベル
   Widget _buildYAxisLabels(double minY, double maxY) {
     final range = maxY - minY;
     final labels = <Widget>[];
-    for (int i = 0; i <= 5; i++) {
-      final value = maxY - (range * i / 5);
+    for (int i = 0; i <= 10; i++) {
+      final value = maxY - (range * i / 10);
       labels.add(
         Expanded(
           child: Align(
@@ -1594,31 +1782,47 @@ class _DetailScreenState extends State<DetailScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final labels = <Widget>[];
+        if (candles.isEmpty || constraints.maxWidth == 0) return Stack(children: labels);
+
         final candleWidth = constraints.maxWidth / candles.length;
         final format = ['5m', '15m', '30m', '1h', '4h'].contains(_interval)
             ? DateFormat('HH:mm')
             : DateFormat('MM/dd');
 
+        double? lastLabelRightEdge; // 最後に描画したラベルの右端のX座標
+
         for (int i = 0; i < candles.length; i += interval) {
-          // ラベル位置を計算（左端・右端で切れないように調整）
-          double leftPos = i * candleWidth + candleWidth / 2 - 20;
-          // 左端で切れないように
-          if (leftPos < 0) leftPos = 0;
-          // 右端で切れないように
-          if (leftPos > constraints.maxWidth - 40) {
-            leftPos = constraints.maxWidth - 40;
+          if (i == 0) continue; // 一番左のラベルを描画しない
+
+          const double labelWidth = 30; // ラベルの幅を小さく
+          // ラベルの理想的な中央位置
+          final double idealCenter = i * candleWidth + candleWidth / 2;
+          // ラベルの左端の開始位置
+          double leftPos = idealCenter - (labelWidth / 2);
+
+          // 描画範囲内に収まるように位置を調整
+          // if (leftPos < 0) { // 左端の固定を削除
+          //   leftPos = 0;
+          // }
+          if (leftPos + labelWidth > constraints.maxWidth) {
+            leftPos = constraints.maxWidth - labelWidth;
+          }
+
+          // 前のラベルと重なる場合は描画をスキップ
+          if (lastLabelRightEdge != null && leftPos < lastLabelRightEdge) {
+            continue;
           }
 
           labels.add(
             Positioned(
               left: leftPos,
               child: SizedBox(
-                width: 40,
+                width: labelWidth,
                 child: Text(
                   format.format(candles[i].date),
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                    fontSize: 9,
+                    fontSize: 9, // フォントサイズを元に戻す
                     color: Colors.black,
                     fontWeight: FontWeight.bold,
                   ),
@@ -1626,6 +1830,8 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
             ),
           );
+
+          lastLabelRightEdge = leftPos + labelWidth; // 最後に描画したラベルの右端を更新
         }
         return Stack(children: labels);
       },
@@ -1669,14 +1875,14 @@ class _DetailScreenState extends State<DetailScreen> {
           Text(
             label,
             style: const TextStyle(
-              color: Colors.black,
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.bold,
             ),
           ),
           Text(
             value,
             style: const TextStyle(
-              color: Colors.black,
+              color: AppColors.textPrimary,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -1822,6 +2028,7 @@ class CandlestickPainter extends CustomPainter {
   final int totalLength;
   final int xLabelInterval;
   final String interval;
+  final int indicatorStartIndex; // インジケーターが有効になる開始インデックス
 
   CandlestickPainter({
     required this.candles,
@@ -1833,6 +2040,7 @@ class CandlestickPainter extends CustomPainter {
     int? totalLength,
     this.xLabelInterval = 5,
     this.interval = '1d',
+    this.indicatorStartIndex = 0,
   }) : totalLength = totalLength ?? candles.length;
 
   @override
@@ -1842,42 +2050,42 @@ class CandlestickPainter extends CustomPainter {
     final candleWidth = size.width / candles.length;
     final priceRange = maxY - minY;
 
-    // グリッド線を描画（黒背景用に明るく）
+    // グリッド線を描画
     final gridPaint = Paint()
-      ..color = Colors.grey.shade800
+      ..color = AppColors.textSecondary.withOpacity(0.8)
       ..strokeWidth = 0.5;
 
     // 横グリッド線
-    for (int i = 0; i <= 5; i++) {
-      final y = size.height * i / 5;
-      canvas.drawLine(Offset(0, y), Offset(size.width, y), gridPaint);
+    final dashLength = 3.0;
+    final spaceLength = 3.0;
+    for (int i = 0; i <= 10; i++) {
+      final y = size.height * i / 10;
+      double currentX = 0;
+      while (currentX < size.width) {
+        canvas.drawLine(Offset(currentX, y), Offset(min(currentX + dashLength, size.width), y), gridPaint);
+        currentX += dashLength + spaceLength;
+      }
     }
 
     // 縦グリッド線（X軸ラベル位置に合わせる）
     for (int i = 0; i < candles.length; i += xLabelInterval) {
       final x = i * candleWidth + candleWidth / 2;
-      canvas.drawLine(Offset(x, 0), Offset(x, size.height), gridPaint);
-    }
-
-    // ボリンジャーバンドを描画（グレー系で統一）
-    if (bb != null) {
-      _drawIndicatorLine(canvas, size, bb!.middle, Colors.white70, 1.5, priceRange);
-      _drawIndicatorLine(canvas, size, bb!.upper1, Colors.grey.shade500, 1.0, priceRange);
-      _drawIndicatorLine(canvas, size, bb!.lower1, Colors.grey.shade500, 1.0, priceRange);
-      _drawIndicatorLine(canvas, size, bb!.upper2, Colors.grey.shade600, 1.0, priceRange);
-      _drawIndicatorLine(canvas, size, bb!.lower2, Colors.grey.shade600, 1.0, priceRange);
-    }
-
-    // EMAを描画（オレンジ系で統一）
-    if (emaLines != null && emaLines!.isNotEmpty) {
-      final emaColors = [Colors.orange.shade300, Colors.orange, Colors.orange.shade700];
-      for (int i = 0; i < emaLines!.length && i < emaColors.length; i++) {
-        _drawIndicatorLine(canvas, size, emaLines![i], emaColors[i], 1.5, priceRange);
+      double currentY = 0;
+      while (currentY < size.height) {
+        canvas.drawLine(Offset(x, currentY), Offset(x, min(currentY + dashLength, size.height)), gridPaint);
+        currentY += dashLength + spaceLength;
       }
     }
 
-    // 各ローソク足を描画
-    for (int i = 0; i < candles.length; i++) {
+    // チャート全体を囲む枠線を描画
+    final borderPaint = Paint()
+      ..color = AppColors.textSecondary
+      ..strokeWidth = 1.5
+      ..style = PaintingStyle.stroke;
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), borderPaint);
+
+    // 各ローソク足を描画（インジケーターの有効範囲のみ）
+    for (int i = indicatorStartIndex; i < candles.length; i++) {
       final candle = candles[i];
       final x = i * candleWidth + candleWidth / 2;
 
@@ -1888,18 +2096,18 @@ class CandlestickPainter extends CustomPainter {
       final closeY = size.height - ((candle.close - minY) / priceRange * size.height);
 
       final isPositive = candle.close >= candle.open;
-      final color = isPositive ? Colors.green : Colors.red;
+      final color = isPositive ? Colors.red : Colors.lightBlue; // 陽線を赤、陰線を水色に
 
       // ヒゲ（高値-安値の線）
       final wickPaint = Paint()
-        ..color = color
+        ..color = Colors.grey // ヒゲの色を灰色に
         ..strokeWidth = 1;
       canvas.drawLine(Offset(x, highY), Offset(x, lowY), wickPaint);
 
       // ローソク本体
       final bodyPaint = Paint()
         ..color = color
-        ..style = isPositive ? PaintingStyle.stroke : PaintingStyle.fill
+        ..style = PaintingStyle.fill // 陽線も常に塗りつぶすように変更
         ..strokeWidth = 1;
 
       final bodyTop = isPositive ? closeY : openY;
@@ -1915,6 +2123,31 @@ class CandlestickPainter extends CustomPainter {
         height: bodyHeight < 1 ? 1 : bodyHeight,
       );
       canvas.drawRect(rect, bodyPaint);
+    }
+
+    // ボリンジャーバンドを描画（内側から紫、ピンク、濃い目のピンク）
+    if (bb != null) {
+      final bbMiddleColor = Colors.pink.shade700.withOpacity(0.6); // 濃い目のピンク
+      final bb1SigmaColor = Colors.purple.withOpacity(0.6); // 紫
+      final bb2SigmaColor = Colors.pink.withOpacity(0.6); // ピンク
+
+      _drawIndicatorLine(canvas, size, bb!.middle, bbMiddleColor, 1.0, priceRange);
+      _drawIndicatorLine(canvas, size, bb!.upper1, bb1SigmaColor, 0.75, priceRange);
+      _drawIndicatorLine(canvas, size, bb!.lower1, bb1SigmaColor, 0.75, priceRange);
+      _drawIndicatorLine(canvas, size, bb!.upper2, bb2SigmaColor, 0.75, priceRange);
+      _drawIndicatorLine(canvas, size, bb!.lower2, bb2SigmaColor, 0.75, priceRange);
+    }
+
+    // EMAを描画（短いものから青、水色、緑）
+    if (emaLines != null && emaLines!.isNotEmpty) {
+      final emaColors = [
+        Colors.blue.shade800.withOpacity(0.6), // 青を深めに
+        Colors.lightBlue.shade300.withOpacity(0.6), // 水色を明るめに
+        Colors.green.withOpacity(0.6)
+      ]; // 短いものから青（深め）、水色（明るめ）、緑
+      for (int i = 0; i < emaLines!.length && i < emaColors.length; i++) {
+        _drawIndicatorLine(canvas, size, emaLines![i], emaColors[i], 1.0, priceRange);
+      }
     }
   }
 
@@ -1951,7 +2184,8 @@ class CandlestickPainter extends CustomPainter {
         oldDelegate.minY != minY ||
         oldDelegate.maxY != maxY ||
         oldDelegate.bb != bb ||
-        oldDelegate.emaLines != emaLines;
+        oldDelegate.emaLines != emaLines ||
+        oldDelegate.indicatorStartIndex != indicatorStartIndex;
   }
 }
 
@@ -2453,7 +2687,7 @@ class _CrossSettingsSheetState extends State<_CrossSettingsSheet> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(success ? 'テストメールを送信しました' : 'テストメールの送信に失敗しました'),
-          backgroundColor: success ? Colors.green : Colors.red,
+          backgroundColor: success ? AppColors.success : AppColors.error,
         ),
       );
     }
@@ -2834,12 +3068,12 @@ class _CrossSettingsSheetState extends State<_CrossSettingsSheet> {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: isUp ? Colors.green.withAlpha(30) : Colors.red.withAlpha(30),
+                color: isUp ? AppColors.bullish.withAlpha(30) : AppColors.bearish.withAlpha(30),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(
                 isUp ? Icons.arrow_upward : Icons.arrow_downward,
-                color: isUp ? Colors.green : Colors.red,
+                color: isUp ? AppColors.bullish : AppColors.bearish,
               ),
             ),
             const SizedBox(width: 12),
@@ -2859,7 +3093,7 @@ class _CrossSettingsSheetState extends State<_CrossSettingsSheet> {
                         isUp ? '上抜け' : '下抜け',
                         style: TextStyle(
                           fontSize: 12,
-                          color: isUp ? Colors.green : Colors.red,
+                          color: isUp ? AppColors.bullish : AppColors.bearish,
                         ),
                       ),
                       if (thresholdReached) ...[

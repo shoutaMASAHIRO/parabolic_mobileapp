@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/stock_service.dart';
+import '../theme/app_colors.dart';
 import 'login_screen.dart';
 import 'detail_screen.dart';
 
@@ -164,7 +165,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const Icon(Icons.error_outline, size: 48, color: AppColors.error),
             const SizedBox(height: 16),
             Text(_error!, textAlign: TextAlign.center),
             const SizedBox(height: 16),
@@ -210,8 +211,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       margin: const EdgeInsets.only(bottom: 12),
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: Colors.orange.shade100,
-                          child: const Icon(Icons.currency_bitcoin, color: Colors.orange),
+                          backgroundColor: AppColors.cryptoLight,
+                          child: const Icon(Icons.currency_bitcoin, color: AppColors.cryptoPrimary),
                         ),
                         title: Text(
                           displayName,
@@ -281,8 +282,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       margin: const EdgeInsets.only(bottom: 12),
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: Colors.green.shade100,
-                          child: const Icon(Icons.currency_exchange, color: Colors.green),
+                          backgroundColor: AppColors.forexLight,
+                          child: const Icon(Icons.currency_exchange, color: AppColors.forexPrimary),
                         ),
                         title: Text(
                           displayName,
@@ -353,8 +354,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       margin: const EdgeInsets.only(bottom: 12),
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: Colors.blue.shade100,
-                          child: const Icon(Icons.show_chart, color: Colors.blue),
+                          backgroundColor: AppColors.stockLight,
+                          child: const Icon(Icons.show_chart, color: AppColors.stockPrimary),
                         ),
                         title: Text(
                           displayName,
@@ -420,7 +421,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
             child: const Text('削除'),
           ),
         ],
@@ -462,7 +463,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
             child: const Text('削除'),
           ),
         ],
@@ -504,7 +505,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
             child: const Text('削除'),
           ),
         ],
@@ -632,11 +633,11 @@ class _AssetSearchSheetState extends State<_AssetSearchSheet> {
   Color get _categoryColor {
     switch (widget.category) {
       case MarketCategory.crypto:
-        return Colors.orange;
+        return AppColors.cryptoPrimary;
       case MarketCategory.forex:
-        return Colors.green;
+        return AppColors.forexPrimary;
       case MarketCategory.stock:
-        return Colors.blue;
+        return AppColors.stockPrimary;
     }
   }
 
@@ -810,16 +811,16 @@ class _AssetSearchSheetState extends State<_AssetSearchSheet> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search, size: 64, color: Colors.grey.shade400),
+            Icon(Icons.search, size: 64, color: AppColors.textSecondary.withOpacity(0.5)),
             const SizedBox(height: 16),
             Text(
               _hintText,
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+              style: const TextStyle(color: AppColors.textSecondary, fontSize: 16),
             ),
             const SizedBox(height: 8),
             Text(
               _exampleText,
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 14),
+              style: TextStyle(color: AppColors.textSecondary.withOpacity(0.7), fontSize: 14),
             ),
           ],
         ),
@@ -831,11 +832,11 @@ class _AssetSearchSheetState extends State<_AssetSearchSheet> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.search_off, size: 64, color: Colors.grey.shade400),
+            Icon(Icons.search_off, size: 64, color: AppColors.textSecondary.withOpacity(0.5)),
             const SizedBox(height: 16),
             Text(
               '検索結果がありません',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+              style: const TextStyle(color: AppColors.textSecondary, fontSize: 16),
             ),
           ],
         ),
@@ -855,26 +856,26 @@ class _AssetSearchSheetState extends State<_AssetSearchSheet> {
         return ListTile(
           leading: CircleAvatar(
             backgroundColor: isAdded
-                ? Colors.grey.shade200
-                : _categoryColor.withAlpha(30),
+                ? AppColors.borderLight
+                : _categoryColor.withOpacity(0.15),
             child: Icon(
               _categoryIcon,
-              color: isAdded ? Colors.grey : _categoryColor,
+              color: isAdded ? AppColors.textSecondary : _categoryColor,
             ),
           ),
           title: Text(
             displayName,
             style: TextStyle(
               fontWeight: FontWeight.bold,
-              color: isAdded ? Colors.grey : null,
+              color: isAdded ? AppColors.textSecondary : null,
             ),
           ),
           subtitle: Text(
             '$symbol • $description',
-            style: TextStyle(color: isAdded ? Colors.grey : null),
+            style: TextStyle(color: isAdded ? AppColors.textSecondary : null),
           ),
           trailing: isAdded
-              ? const Icon(Icons.check, color: Colors.green)
+              ? const Icon(Icons.check, color: AppColors.success)
               : Icon(Icons.add, color: _categoryColor),
           onTap: isAdded
               ? null

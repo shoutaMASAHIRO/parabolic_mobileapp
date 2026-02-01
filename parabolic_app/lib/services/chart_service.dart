@@ -5,8 +5,12 @@ import 'cross_detection_service.dart';
 class ChartService {
   final ApiService _api = ApiService();
 
-  Future<List<Candle>> getChartData(String symbol, {String interval = '1d'}) async {
-    final response = await _api.get('/api/data?ticker=$symbol&interval=$interval');
+  Future<List<Candle>> getChartData(String symbol, {String interval = '1d', String? to}) async {
+    String url = '/api/data?ticker=$symbol&interval=$interval';
+    if (to != null) {
+      url += '&to=$to';
+    }
+    final response = await _api.get(url);
 
     if (response.isSuccess && response.jsonList != null) {
       return response.jsonList!

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/user.dart';
 import '../services/memo_service.dart';
+import '../theme/app_colors.dart';
 
 class MemoScreen extends StatefulWidget {
   final String symbol;
@@ -82,12 +83,12 @@ class _MemoScreenState extends State<MemoScreen> {
       if (mounted) {
         if (memo != null) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('メモを保存しました'), backgroundColor: Colors.green),
+            const SnackBar(content: Text('メモを保存しました'), backgroundColor: AppColors.success),
           );
           _loadMemos();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('メモの保存に失敗しました'), backgroundColor: Colors.red),
+            const SnackBar(content: Text('メモの保存に失敗しました'), backgroundColor: AppColors.error),
           );
         }
       }
@@ -143,7 +144,7 @@ class _MemoScreenState extends State<MemoScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
             child: const Text('削除'),
           ),
         ],
@@ -184,7 +185,7 @@ class _MemoScreenState extends State<MemoScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.error_outline, size: 48, color: Colors.red),
+            const Icon(Icons.error_outline, size: 48, color: AppColors.error),
             const SizedBox(height: 16),
             Text(_error!, textAlign: TextAlign.center),
             const SizedBox(height: 16),
@@ -202,16 +203,16 @@ class _MemoScreenState extends State<MemoScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.note_outlined, size: 64, color: Colors.grey.shade400),
+            Icon(Icons.note_outlined, size: 64, color: AppColors.textSecondary.withOpacity(0.5)),
             const SizedBox(height: 16),
-            Text(
+            const Text(
               'メモがありません',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
             ),
             const SizedBox(height: 8),
             Text(
               '右下の + ボタンでメモを追加できます',
-              style: TextStyle(color: Colors.grey.shade500, fontSize: 14),
+              style: TextStyle(color: AppColors.textSecondary.withOpacity(0.7), fontSize: 14),
             ),
           ],
         ),
@@ -249,8 +250,8 @@ class _MemoScreenState extends State<MemoScreen> {
                   Expanded(
                     child: Text(
                       dateFormat.format(memo.updatedAt),
-                      style: TextStyle(
-                        color: Colors.grey.shade600,
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
                         fontSize: 12,
                       ),
                     ),
@@ -258,7 +259,7 @@ class _MemoScreenState extends State<MemoScreen> {
                   IconButton(
                     icon: const Icon(Icons.delete_outline, size: 20),
                     onPressed: () => _deleteMemo(memo),
-                    color: Colors.grey.shade600,
+                    color: AppColors.textSecondary,
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(),
                   ),
