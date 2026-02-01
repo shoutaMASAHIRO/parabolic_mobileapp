@@ -1037,7 +1037,7 @@ class _DetailScreenState extends State<DetailScreen> {
           children: [
             Icon(
               isPositive ? Icons.arrow_upward : Icons.arrow_downward,
-              color: isPositive ? AppColors.bullish : AppColors.bearish,
+              color: isPositive ? Colors.red : Colors.lightBlue, // 上昇時は赤、下落時は水色
               size: 20,
             ),
             const SizedBox(width: 4),
@@ -1045,7 +1045,7 @@ class _DetailScreenState extends State<DetailScreen> {
               priceChangeStr,
               style: TextStyle(
                 fontSize: 16,
-                color: isPositive ? AppColors.bullish : AppColors.bearish,
+                color: isPositive ? Colors.red : Colors.lightBlue, // 上昇時は赤、下落時は水色
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -1108,7 +1108,7 @@ class _DetailScreenState extends State<DetailScreen> {
     final maxY = displayCandles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
 
     final isPositive = displayCandles.last.close >= displayCandles.first.close;
-    final chartColor = isPositive ? AppColors.bullish : AppColors.bearish;
+    final chartColor = isPositive ? Colors.red : Colors.lightBlue; // 上昇時は赤、下落時は水色に
 
     // メインの価格ライン
     final lineBars = <LineChartBarData>[
