@@ -304,9 +304,12 @@ function pickRangeByInterval(interval) {
   // Yahoo は interval によって取得できる期間が違うのでざっくり最適化
   if (interval.endsWith('m')) return '5d';
   if (interval.endsWith('h')) return '60d';
-  if (interval === '1d') return '1y';
-  if (interval === '1wk') return '5y';
-  return '1y';
+  if (interval === '1d') return '5y';    // 日足: 5年分
+  if (interval === '5d') return '10y';   // 5日足: 10年分
+  if (interval === '1wk') return '10y';  // 週足: 10年分
+  if (interval === '1mo') return 'max';  // 月足: 最大期間
+  if (interval === '3mo') return 'max';  // 四半期足: 最大期間
+  return '5y';
 }
 
 function normalizeInterval(interval) {
@@ -955,32 +958,48 @@ app.get('/api/mobile/threshold', requireAuth, async (req, res) => {
   }
 });
 
-// モバイルアプリ用：インジケーター設定を保存
-// POST /api/mobile/indicator-settings { "areBollingerBandsVisible": true, "areEmaVisible": true, ... }
+// モバイルアプリ用：インジケーター設定を保存（銘柄ごと）
+// POST /api/mobile/indicator-settings { "symbol": "BTC-USD", "areBollingerBandsVisible": true, ... }
 app.post('/api/mobile/indicator-settings', requireAuth, async (req, res) => {
   try {
     const uid = req.session.userId;
     const incoming = req.body || {};
+    const symbol = incoming.symbol || 'GLOBAL'; // 銘柄指定がなければGLOBAL
 
     const settings = (await getUserSettings(uid)) || {};
+
+    // 銘柄ごとのインジケーター設定を初期化
+    if (!settings.indicatorSettingsBySymbol) {
+      settings.indicatorSettingsBySymbol = {};
+    }
+    if (!settings.indicatorSettingsBySymbol[symbol]) {
+      settings.indicatorSettingsBySymbol[symbol] = {};
+    }
+
+    const symbolSettings = settings.indicatorSettingsBySymbol[symbol];
 
     // インジケーター関連の設定をマージ
     const indicatorKeys = [
       'areBollingerBandsVisible', 'areEmaVisible',
       'bbPeriod', 'bbStdDev',
       'ema1Period', 'ema2Period', 'ema3Period',
-      'emailAlertsEnabled'
+      'emailAlertsEnabled',
+      // オシレーター設定
+      'rsiEnabled', 'rsiPeriod',
+      'macdEnabled', 'macdFast', 'macdSlow', 'macdSignal',
+      'stochasticEnabled', 'stochKPeriod', 'stochDPeriod', 'stochSmooth',
+      'cciEnabled', 'cciPeriod'
     ];
 
     for (const key of indicatorKeys) {
       if (incoming[key] !== undefined) {
-        settings[key] = incoming[key];
+        symbolSettings[key] = incoming[key];
       }
     }
 
     await upsertUserSettings(uid, settings);
 
-    console.log(`[MOBILE INDICATOR SETTINGS] User:${uid} updated indicator settings`);
+    console.log(`[MOBILE INDICATOR SETTINGS] User:${uid} Symbol:${symbol} updated`);
     return res.json({ ok: true });
   } catch (e) {
     console.error(e);
@@ -988,22 +1007,39 @@ app.post('/api/mobile/indicator-settings', requireAuth, async (req, res) => {
   }
 });
 
-// モバイルアプリ用：インジケーター設定を取得
-// GET /api/mobile/indicator-settings
+// モバイルアプリ用：インジケーター設定を取得（銘柄ごと）
+// GET /api/mobile/indicator-settings?symbol=BTC-USD
 app.get('/api/mobile/indicator-settings', requireAuth, async (req, res) => {
   try {
     const uid = req.session.userId;
+    const symbol = req.query.symbol || 'GLOBAL';
     const settings = (await getUserSettings(uid)) || {};
 
+    // 銘柄ごとの設定を取得（なければデフォルト値）
+    const symbolSettings = settings.indicatorSettingsBySymbol?.[symbol] || {};
+
     return res.json({
-      areBollingerBandsVisible: settings.areBollingerBandsVisible ?? false,
-      areEmaVisible: settings.areEmaVisible ?? false,
-      bbPeriod: settings.bbPeriod ?? 20,
-      bbStdDev: settings.bbStdDev ?? 2,
-      ema1Period: settings.ema1Period ?? 10,
-      ema2Period: settings.ema2Period ?? 25,
-      ema3Period: settings.ema3Period ?? 50,
-      emailAlertsEnabled: settings.emailAlertsEnabled ?? false,
+      areBollingerBandsVisible: symbolSettings.areBollingerBandsVisible ?? false,
+      areEmaVisible: symbolSettings.areEmaVisible ?? false,
+      bbPeriod: symbolSettings.bbPeriod ?? 20,
+      bbStdDev: symbolSettings.bbStdDev ?? 2,
+      ema1Period: symbolSettings.ema1Period ?? 10,
+      ema2Period: symbolSettings.ema2Period ?? 25,
+      ema3Period: symbolSettings.ema3Period ?? 50,
+      emailAlertsEnabled: symbolSettings.emailAlertsEnabled ?? false,
+      // オシレーター設定
+      rsiEnabled: symbolSettings.rsiEnabled ?? false,
+      rsiPeriod: symbolSettings.rsiPeriod ?? 14,
+      macdEnabled: symbolSettings.macdEnabled ?? false,
+      macdFast: symbolSettings.macdFast ?? 12,
+      macdSlow: symbolSettings.macdSlow ?? 26,
+      macdSignal: symbolSettings.macdSignal ?? 9,
+      stochasticEnabled: symbolSettings.stochasticEnabled ?? false,
+      stochKPeriod: symbolSettings.stochKPeriod ?? 14,
+      stochDPeriod: symbolSettings.stochDPeriod ?? 3,
+      stochSmooth: symbolSettings.stochSmooth ?? 3,
+      cciEnabled: symbolSettings.cciEnabled ?? false,
+      cciPeriod: symbolSettings.cciPeriod ?? 20,
     });
   } catch (e) {
     console.error(e);

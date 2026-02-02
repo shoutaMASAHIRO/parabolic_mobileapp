@@ -5,8 +5,8 @@ import 'cross_detection_service.dart';
 class ChartService {
   final ApiService _api = ApiService();
 
-  Future<List<Candle>> getChartData(String symbol, {String interval = '1d', String? to}) async {
-    String url = '/api/data?ticker=$symbol&interval=$interval';
+  Future<List<Candle>> getChartData(String symbol, {String interval = '1d', String? to, int limit = 1500}) async {
+    String url = '/api/data?ticker=$symbol&interval=$interval&limit=$limit';
     if (to != null) {
       url += '&to=$to';
     }
@@ -98,8 +98,9 @@ class ChartService {
     return {};
   }
 
-  // インジケーター設定をサーバーに保存
+  // インジケーター設定をサーバーに保存（銘柄ごと）
   Future<bool> saveIndicatorSettingsToServer({
+    required String symbol,
     required bool bbEnabled,
     required bool emaEnabled,
     required int bbPeriod,
@@ -123,6 +124,7 @@ class ChartService {
     int cciPeriod = 20,
   }) async {
     final response = await _api.post('/api/mobile/indicator-settings', {
+      'symbol': symbol,
       'areBollingerBandsVisible': bbEnabled,
       'areEmaVisible': emaEnabled,
       'bbPeriod': bbPeriod,
@@ -148,9 +150,9 @@ class ChartService {
     return response.isSuccess;
   }
 
-  // インジケーター設定をサーバーから取得
-  Future<Map<String, dynamic>?> getIndicatorSettingsFromServer() async {
-    final response = await _api.get('/api/mobile/indicator-settings');
+  // インジケーター設定をサーバーから取得（銘柄ごと）
+  Future<Map<String, dynamic>?> getIndicatorSettingsFromServer(String symbol) async {
+    final response = await _api.get('/api/mobile/indicator-settings?symbol=$symbol');
     if (response.isSuccess && response.json != null) {
       return response.json;
     }

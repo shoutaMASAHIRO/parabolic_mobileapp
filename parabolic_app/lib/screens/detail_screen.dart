@@ -52,9 +52,8 @@ class _DetailScreenState extends State<DetailScreen> {
   List<Candle> _candles = [];
   bool _isLoading = true;
   String? _error;
-  bool _isFetchingOlderData = false;
   String _interval = '1d';
-  ChartType _chartType = ChartType.line;
+  ChartType _chartType = ChartType.candlestick;
 
   // 自動更新タイマー（60秒間隔）
   static const int _refreshIntervalSeconds = 60;
@@ -62,8 +61,9 @@ class _DetailScreenState extends State<DetailScreen> {
   int _secondsUntilRefresh = _refreshIntervalSeconds;
 
   // チャートのズーム・パン状態
+  // チャートのズーム・パン状態
   double _chartZoom = 1.0;
-  double _chartPanOffsetX = 0.0;
+  double _chartPanOffsetX = 1.0; // 右端（最新データ）から表示開始
   double _chartPanOffsetY = 0.0;
   static const double _minZoom = 1.0;
   static const double _maxZoom = 8.0;
@@ -172,9 +172,9 @@ class _DetailScreenState extends State<DetailScreen> {
     _startRefreshTimer();
   }
 
-  // サーバーからインジケーター設定を読み込み
+  // サーバーからインジケーター設定を読み込み（銘柄ごと）
   Future<void> _loadIndicatorSettingsFromServer() async {
-    final settings = await _chartService.getIndicatorSettingsFromServer();
+    final settings = await _chartService.getIndicatorSettingsFromServer(widget.symbol);
     if (settings != null && mounted) {
       setState(() {
         _indicators['bb']!.enabled = settings['areBollingerBandsVisible'] == true;
@@ -307,7 +307,6 @@ class _DetailScreenState extends State<DetailScreen> {
     setState(() {
       _isLoading = true;
       _error = null;
-      _noMoreOlderData = false; // 過去データ取得フラグをリセット
     });
 
     try {
@@ -327,23 +326,14 @@ class _DetailScreenState extends State<DetailScreen> {
             _usdJpyRate = rate;
           }
 
-          // --- 初期スクロール位置の計算 ---
-          // 3年分のうち、最新の1年分を表示する
-          const double initialDisplayRatio = 1.0 / 3.0; // 1/3を表示
-          if (_candles.length > 1) {
-            final totalDataPoints = _candles.length.toDouble();
-            final visibleDataPoints = totalDataPoints / _chartZoom; // 現在のズームレベルでの表示数
-            final maxPanOffset = totalDataPoints - visibleDataPoints;
-            if (maxPanOffset > 0) {
-              // 全体の 2/3 の位置から表示を開始する
-              _chartPanOffsetX = (1.0 - initialDisplayRatio).clamp(0.0, 1.0);
-            } else {
-              _chartPanOffsetX = 0.0;
-            }
+          // 初期表示位置を右端（最新データ）に設定
+          // データ数が基準表示数以下の場合は左端（0.0）に設定
+          final baseVisible = _getBaseVisibleDataPoints();
+          if (candles.length <= baseVisible) {
+            _chartPanOffsetX = 0.0; // データが少ない場合は左端から表示
           } else {
-            _chartPanOffsetX = 0.0;
+            _chartPanOffsetX = 1.0; // データが多い場合は右端（最新）から表示
           }
-          // --- ここまで ---
 
           _isLoading = false;
         });
@@ -413,75 +403,11 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  // 過去データがこれ以上ないことを示すフラグ
-  bool _noMoreOlderData = false;
-
-  // 無限スクロールで過去のデータを取得
-  Future<void> _fetchOlderData() async {
-    if (_isFetchingOlderData || _candles.isEmpty || _noMoreOlderData) return;
-
-    setState(() {
-      _isFetchingOlderData = true;
-    });
-
-    try {
-      final String toTimestamp = _candles.first.date.toIso8601String();
-      final olderCandles = await _chartService.getChartData(
-        widget.symbol,
-        interval: _interval,
-        to: toTimestamp,
-      );
-
-      if (olderCandles.isNotEmpty && mounted) {
-        // 安全装置: 取得したデータが本当に古いデータであることを確認
-        if (olderCandles.last.date.isBefore(_candles.first.date)) {
-          setState(() {
-            final newCandlesCount = olderCandles.length;
-            final oldTotalDataPoints = _candles.length.toDouble();
-            final oldVisibleDataPoints = oldTotalDataPoints / _chartZoom;
-
-            // 現在表示している位置（データポイント数）を計算
-            final oldMaxPanOffset = oldTotalDataPoints - oldVisibleDataPoints;
-            final currentViewStartIndex = (_chartPanOffsetX * oldMaxPanOffset);
-
-            _candles.insertAll(0, olderCandles);
-
-            // 新しいデータが追加された後も同じ位置を表示し続けるように調整
-            final newTotalDataPoints = _candles.length.toDouble();
-            final newVisibleDataPoints = newTotalDataPoints / _chartZoom;
-            final newMaxPanOffset = newTotalDataPoints - newVisibleDataPoints;
-
-            if (newMaxPanOffset > 0) {
-              // 元の表示位置に新しいデータ分のオフセットを加算
-              final newViewStartIndex = currentViewStartIndex + newCandlesCount;
-              _chartPanOffsetX = (newViewStartIndex / newMaxPanOffset).clamp(0.0, 1.0);
-            }
-          });
-        } else {
-          // 取得したデータが古くない場合、これ以上過去データがない
-          _noMoreOlderData = true;
-          debugPrint("No more older data available.");
-        }
-      } else {
-        // データが空の場合、これ以上過去データがない
-        _noMoreOlderData = true;
-      }
-    } catch (e) {
-      debugPrint('Failed to fetch older chart data: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isFetchingOlderData = false;
-        });
-      }
-    }
-  }
-
-
 
   // インジケーター設定をサーバーに同期
   Future<void> _syncIndicatorSettingsToServer() async {
     await _chartService.saveIndicatorSettingsToServer(
+      symbol: widget.symbol,
       bbEnabled: _showBB,
       emaEnabled: _showEMA,
       bbPeriod: _bbPeriod,
@@ -661,6 +587,7 @@ class _DetailScreenState extends State<DetailScreen> {
             onSelected: (value) {
               setState(() {
                 _interval = value;
+                _chartPanOffsetX = 0.0; // インターバル変更時にリセット
               });
               _loadData();
             },
@@ -1297,15 +1224,17 @@ class _DetailScreenState extends State<DetailScreen> {
 
     // ズーム・パンは描画対象のリスト基準で計算
     final totalDataPoints = displayCandles.length.toDouble();
-    final visibleDataPoints = totalDataPoints / _chartZoom;
-    final maxPanOffset = totalDataPoints - visibleDataPoints;
+    // 基準表示数（ズーム1.0で表示する量）を使用し、全データ数を超えないようにする
+    final baseVisible = _getBaseVisibleDataPoints().toDouble();
+    final visibleDataPoints = (baseVisible / _chartZoom).clamp(1.0, totalDataPoints);
+    final maxPanOffset = (totalDataPoints - visibleDataPoints).clamp(0.0, totalDataPoints);
     final panOffset = (_chartPanOffsetX * maxPanOffset).clamp(0.0, maxPanOffset);
     final visibleMinX = panOffset;
-    final visibleMaxX = panOffset + visibleDataPoints - 1;
+    final visibleMaxX = (panOffset + visibleDataPoints - 1).clamp(0.0, totalDataPoints - 1);
 
     // 表示範囲内のデータでY軸の範囲を再計算
     final visibleStartIdx = visibleMinX.floor().clamp(0, displayCandles.length - 1);
-    final visibleEndIdx = visibleMaxX.ceil().clamp(0, displayCandles.length - 1);
+    final visibleEndIdx = visibleMaxX.ceil().clamp(visibleStartIdx, displayCandles.length - 1);
     final visibleCandles = displayCandles.sublist(visibleStartIdx, visibleEndIdx + 1);
 
     double visibleMinY = minY;
@@ -1325,9 +1254,9 @@ class _DetailScreenState extends State<DetailScreen> {
     // X軸ラベル間隔を計算（重複防止）
     final xLabelInterval = _calculateXLabelInterval(visibleCandles.length);
 
-    // オシレーター用の元リストのインデックス
-    final originalListVisibleStartIdx = visibleStartIdx + startOffset;
-    final originalListVisibleEndIdx = visibleEndIdx + 1 + startOffset;
+    // オシレーター用の元リストのインデックス（範囲外アクセス防止）
+    final originalListVisibleStartIdx = (visibleStartIdx + startOffset).clamp(0, candles.length);
+    final originalListVisibleEndIdx = (visibleEndIdx + 1 + startOffset).clamp(originalListVisibleStartIdx, candles.length);
 
     return SizedBox(
       width: double.infinity,
@@ -1447,20 +1376,8 @@ class _DetailScreenState extends State<DetailScreen> {
             final deltaX = details.focalPointDelta.dx / 150 * sensitivity;
             final deltaY = details.focalPointDelta.dy / 120 * sensitivity;
 
-            // --- 無限スクロールのトリガーロジック（改善版） ---
-            // 1. クランプ前の新しいオフセットを計算
-            final potentialNewPanOffsetX = _chartPanOffsetX - deltaX;
-
-            // 2. 左の境界を超えてドラッグしようとしたことを検知
-            if (potentialNewPanOffsetX < _chartPanOffsetX && // 左に動かそうとしていて
-                _chartPanOffsetX < 0.01 && // すでに左端にいる場合
-                !_isFetchingOlderData && !_noMoreOlderData) {
-              _fetchOlderData();
-            }
-
-            // 3. 境界内にオフセットをクランプして適用
-            _chartPanOffsetX = potentialNewPanOffsetX.clamp(0.0, (1.0 - (1.0 / _chartZoom)).clamp(0.0, 1.0));
-            // --- ここまで ---
+            // スクロール位置を更新（0.0=左端、1.0=右端）
+            _chartPanOffsetX = (_chartPanOffsetX - deltaX).clamp(0.0, 1.0);
 
             _chartPanOffsetY = (_chartPanOffsetY + deltaY).clamp(-1.5, 1.5);
           }
@@ -1517,27 +1434,6 @@ class _DetailScreenState extends State<DetailScreen> {
                       painter: CrosshairPainter(
                         position: _crosshairPosition!,
                         color: AppColors.axisLabel.withOpacity(0.7),
-                      ),
-                    ),
-                  ),
-                // 過去データ読み込みインジケーター
-                if (_isFetchingOlderData)
-                  Positioned(
-                    left: 16,
-                    top: 16,
-                    child: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
                       ),
                     ),
                   ),
@@ -1629,7 +1525,6 @@ class _DetailScreenState extends State<DetailScreen> {
                 max: _maxZoom,
                 onChanged: (value) => setState(() {
                   _chartZoom = value;
-                  _chartPanOffsetX = _chartPanOffsetX.clamp(0.0, (1.0 - (1.0 / _chartZoom)).clamp(0.0, 1.0));
                 }),
               ),
             ),
@@ -1639,7 +1534,7 @@ class _DetailScreenState extends State<DetailScreen> {
             icon: Icon(Icons.refresh, size: 20, color: Colors.grey.shade600),
             onPressed: () => setState(() {
               _chartZoom = 1.0;
-              _chartPanOffsetX = 0.0;
+              _chartPanOffsetX = 1.0; // 右端（最新データ）にリセット
               _chartPanOffsetY = 0.0;
             }),
             padding: EdgeInsets.zero,
@@ -1745,11 +1640,13 @@ class _DetailScreenState extends State<DetailScreen> {
 
     // ズーム・パンは表示対象のキャンドルリストに対して行う
     final totalDataPoints = displayCandles.length.toDouble();
-    final visibleDataPoints = (totalDataPoints / _chartZoom).round();
-    final maxPanOffset = displayCandles.length - visibleDataPoints;
+    // 基準表示数（ズーム1.0で表示する量）を使用し、全データ数を超えないようにする
+    final baseVisible = _getBaseVisibleDataPoints().toDouble();
+    final visibleDataPoints = (baseVisible / _chartZoom).clamp(1.0, totalDataPoints).round();
+    final maxPanOffset = (displayCandles.length - visibleDataPoints).clamp(0, displayCandles.length);
     final panOffset = (_chartPanOffsetX * maxPanOffset).round().clamp(0, maxPanOffset);
-    final visibleStartIdx = panOffset;
-    final visibleEndIdx = (panOffset + visibleDataPoints).clamp(0, displayCandles.length);
+    final visibleStartIdx = panOffset.clamp(0, displayCandles.length - 1);
+    final visibleEndIdx = (panOffset + visibleDataPoints).clamp(visibleStartIdx + 1, displayCandles.length);
     final visibleCandles = displayCandles.sublist(visibleStartIdx, visibleEndIdx);
 
     // 表示範囲内のY軸範囲を再計算
@@ -1772,35 +1669,43 @@ class _DetailScreenState extends State<DetailScreen> {
     BollingerBandsResult? visibleBB;
     List<List<double?>>? visibleEmaLines;
     
-    // 表示範囲のインデックスを元のリストのインデックスに変換
-    final originalListVisibleStartIdx = visibleStartIdx + startOffset;
-    final originalListVisibleEndIdx = visibleEndIdx + startOffset;
-    
-    if (_showBB) {
+    // 表示範囲のインデックスを元のリストのインデックスに変換（範囲外アクセス防止）
+    final originalListVisibleStartIdx = (visibleStartIdx + startOffset).clamp(0, candles.length);
+    final originalListVisibleEndIdx = (visibleEndIdx + startOffset).clamp(originalListVisibleStartIdx, candles.length);
+
+    if (_showBB && originalListVisibleStartIdx < originalListVisibleEndIdx) {
       final fullBB = TechnicalIndicators.calculateBollingerBands(
         fullClosePrices,
         period: _bbPeriod,
         stdDev1: _bbStdDev1,
         stdDev2: _bbStdDev2,
       );
-      // 正しい範囲でスライス
+      // 正しい範囲でスライス（範囲チェック付き）
+      final bbEndIdx = originalListVisibleEndIdx.clamp(0, fullBB.middle.length);
+      final bbStartIdx = originalListVisibleStartIdx.clamp(0, bbEndIdx);
       visibleBB = BollingerBandsResult(
-        middle: fullBB.middle.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
-        upper1: fullBB.upper1.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
-        lower1: fullBB.lower1.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
-        upper2: fullBB.upper2.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
-        lower2: fullBB.lower2.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
+        middle: fullBB.middle.sublist(bbStartIdx, bbEndIdx),
+        upper1: fullBB.upper1.sublist(bbStartIdx, bbEndIdx),
+        lower1: fullBB.lower1.sublist(bbStartIdx, bbEndIdx),
+        upper2: fullBB.upper2.sublist(bbStartIdx, bbEndIdx),
+        lower2: fullBB.lower2.sublist(bbStartIdx, bbEndIdx),
       );
     }
-    if (_showEMA) {
+    if (_showEMA && originalListVisibleStartIdx < originalListVisibleEndIdx) {
       final fullEma1 = TechnicalIndicators.calculateEMA(fullClosePrices, _emaPeriod1);
       final fullEma2 = TechnicalIndicators.calculateEMA(fullClosePrices, _emaPeriod2);
       final fullEma3 = TechnicalIndicators.calculateEMA(fullClosePrices, _emaPeriod3);
-      // 正しい範囲でスライス
+      // 正しい範囲でスライス（範囲チェック付き）
+      final ema1EndIdx = originalListVisibleEndIdx.clamp(0, fullEma1.length);
+      final ema1StartIdx = originalListVisibleStartIdx.clamp(0, ema1EndIdx);
+      final ema2EndIdx = originalListVisibleEndIdx.clamp(0, fullEma2.length);
+      final ema2StartIdx = originalListVisibleStartIdx.clamp(0, ema2EndIdx);
+      final ema3EndIdx = originalListVisibleEndIdx.clamp(0, fullEma3.length);
+      final ema3StartIdx = originalListVisibleStartIdx.clamp(0, ema3EndIdx);
       visibleEmaLines = [
-        fullEma1.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
-        fullEma2.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
-        fullEma3.sublist(originalListVisibleStartIdx, originalListVisibleEndIdx),
+        fullEma1.sublist(ema1StartIdx, ema1EndIdx),
+        fullEma2.sublist(ema2StartIdx, ema2EndIdx),
+        fullEma3.sublist(ema3StartIdx, ema3EndIdx),
       ];
     }
     
@@ -1878,6 +1783,13 @@ class _DetailScreenState extends State<DetailScreen> {
   // オシレーターが有効かどうか
   bool get _hasActiveOscillator => _showRSI || _showMACD || _showStochastic || _showCCI;
 
+  // 安全なsublist（範囲外アクセス防止）
+  List<T> _safeSublist<T>(List<T> list, int start, int end) {
+    final safeEnd = end.clamp(0, list.length);
+    final safeStart = start.clamp(0, safeEnd);
+    return list.sublist(safeStart, safeEnd);
+  }
+
   // オシレーターパネルを構築
   Widget _buildOscillatorPanels(List<Candle> candles, int visibleStartIdx, int visibleEndIdx) {
     final closePrices = candles.map((c) => c.close).toList();
@@ -1886,18 +1798,17 @@ class _DetailScreenState extends State<DetailScreen> {
     // RSIパネル
     if (_showRSI) {
       final rsi = OscillatorIndicators.calculateRSI(closePrices, period: _rsiPeriod);
-      final visibleRSI = rsi.values.sublist(
-        visibleStartIdx.clamp(0, rsi.values.length),
-        visibleEndIdx.clamp(0, rsi.values.length),
-      );
-      panels.add(_buildSingleOscillatorPanel(
-        title: 'RSI($_rsiPeriod)',
-        values: visibleRSI,
-        minY: 0,
-        maxY: 100,
-        lineColor: AppColors.rsiLine,
-        oscillatorType: 'rsi',
-      ));
+      final visibleRSI = _safeSublist(rsi.values, visibleStartIdx, visibleEndIdx);
+      if (visibleRSI.isNotEmpty) {
+        panels.add(_buildSingleOscillatorPanel(
+          title: 'RSI($_rsiPeriod)',
+          values: visibleRSI,
+          minY: 0,
+          maxY: 100,
+          lineColor: AppColors.rsiLine,
+          oscillatorType: 'rsi',
+        ));
+      }
     }
 
     // MACDパネル
@@ -1908,45 +1819,38 @@ class _DetailScreenState extends State<DetailScreen> {
         slowPeriod: _macdSlow,
         signalPeriod: _macdSignal,
       );
-      final visibleMACD = macd.macdLine.sublist(
-        visibleStartIdx.clamp(0, macd.macdLine.length),
-        visibleEndIdx.clamp(0, macd.macdLine.length),
-      );
-      final visibleSignal = macd.signalLine.sublist(
-        visibleStartIdx.clamp(0, macd.signalLine.length),
-        visibleEndIdx.clamp(0, macd.signalLine.length),
-      );
-      final visibleHistogram = macd.histogram.sublist(
-        visibleStartIdx.clamp(0, macd.histogram.length),
-        visibleEndIdx.clamp(0, macd.histogram.length),
-      );
+      final visibleMACD = _safeSublist(macd.macdLine, visibleStartIdx, visibleEndIdx);
+      final visibleSignal = _safeSublist(macd.signalLine, visibleStartIdx, visibleEndIdx);
+      final visibleHistogram = _safeSublist(macd.histogram, visibleStartIdx, visibleEndIdx);
 
-      // MACDの範囲を計算
-      double macdMin = 0, macdMax = 0;
-      for (final v in visibleMACD) {
-        if (v != null) {
-          macdMin = min(macdMin, v);
-          macdMax = max(macdMax, v);
+      if (visibleMACD.isNotEmpty) {
+        // MACDの範囲を計算
+        double macdMin = 0, macdMax = 0;
+        for (final v in visibleMACD) {
+          if (v != null) {
+            macdMin = min(macdMin, v);
+            macdMax = max(macdMax, v);
+          }
         }
-      }
-      for (final v in visibleSignal) {
-        if (v != null) {
-          macdMin = min(macdMin, v);
-          macdMax = max(macdMax, v);
+        for (final v in visibleSignal) {
+          if (v != null) {
+            macdMin = min(macdMin, v);
+            macdMax = max(macdMax, v);
+          }
         }
-      }
-      final macdPadding = (macdMax - macdMin) * 0.1;
+        final macdPadding = (macdMax - macdMin) * 0.1;
 
-      panels.add(_buildSingleOscillatorPanel(
-        title: 'MACD($_macdFast,$_macdSlow,$_macdSignal)',
-        values: visibleMACD,
-        minY: macdMin - macdPadding,
-        maxY: macdMax + macdPadding,
-        lineColor: AppColors.macdLine,
-        oscillatorType: 'macd',
-        signalLine: visibleSignal,
-        histogram: visibleHistogram,
-      ));
+        panels.add(_buildSingleOscillatorPanel(
+          title: 'MACD($_macdFast,$_macdSlow,$_macdSignal)',
+          values: visibleMACD,
+          minY: macdMin - macdPadding,
+          maxY: macdMax + macdPadding,
+          lineColor: AppColors.macdLine,
+          oscillatorType: 'macd',
+          signalLine: visibleSignal,
+          histogram: visibleHistogram,
+        ));
+      }
     }
 
     // Stochasticパネル
@@ -1957,52 +1861,47 @@ class _DetailScreenState extends State<DetailScreen> {
         dPeriod: _stochDPeriod,
         smooth: _stochSmooth,
       );
-      final visibleK = stoch.percentK.sublist(
-        visibleStartIdx.clamp(0, stoch.percentK.length),
-        visibleEndIdx.clamp(0, stoch.percentK.length),
-      );
-      final visibleD = stoch.percentD.sublist(
-        visibleStartIdx.clamp(0, stoch.percentD.length),
-        visibleEndIdx.clamp(0, stoch.percentD.length),
-      );
+      final visibleK = _safeSublist(stoch.percentK, visibleStartIdx, visibleEndIdx);
+      final visibleD = _safeSublist(stoch.percentD, visibleStartIdx, visibleEndIdx);
 
-      panels.add(_buildSingleOscillatorPanel(
-        title: 'Stoch($_stochKPeriod,$_stochDPeriod,$_stochSmooth)',
-        values: visibleK,
-        minY: 0,
-        maxY: 100,
-        lineColor: AppColors.stochK,
-        oscillatorType: 'stochastic',
-        signalLine: visibleD,
-      ));
+      if (visibleK.isNotEmpty) {
+        panels.add(_buildSingleOscillatorPanel(
+          title: 'Stoch($_stochKPeriod,$_stochDPeriod,$_stochSmooth)',
+          values: visibleK,
+          minY: 0,
+          maxY: 100,
+          lineColor: AppColors.stochK,
+          oscillatorType: 'stochastic',
+          signalLine: visibleD,
+        ));
+      }
     }
 
     // CCIパネル
     if (_showCCI) {
       final cci = OscillatorIndicators.calculateCCI(candles, period: _cciPeriod);
-      final visibleCCI = cci.values.sublist(
-        visibleStartIdx.clamp(0, cci.values.length),
-        visibleEndIdx.clamp(0, cci.values.length),
-      );
+      final visibleCCI = _safeSublist(cci.values, visibleStartIdx, visibleEndIdx);
 
-      // CCIの範囲を計算
-      double cciMin = -100, cciMax = 100;
-      for (final v in visibleCCI) {
-        if (v != null) {
-          cciMin = min(cciMin, v);
-          cciMax = max(cciMax, v);
+      if (visibleCCI.isNotEmpty) {
+        // CCIの範囲を計算
+        double cciMin = -100, cciMax = 100;
+        for (final v in visibleCCI) {
+          if (v != null) {
+            cciMin = min(cciMin, v);
+            cciMax = max(cciMax, v);
+          }
         }
-      }
-      final cciPadding = (cciMax - cciMin) * 0.1;
+        final cciPadding = (cciMax - cciMin) * 0.1;
 
-      panels.add(_buildSingleOscillatorPanel(
-        title: 'CCI($_cciPeriod)',
-        values: visibleCCI,
-        minY: cciMin - cciPadding,
-        maxY: cciMax + cciPadding,
-        lineColor: AppColors.cciLine,
-        oscillatorType: 'cci',
-      ));
+        panels.add(_buildSingleOscillatorPanel(
+          title: 'CCI($_cciPeriod)',
+          values: visibleCCI,
+          minY: cciMin - cciPadding,
+          maxY: cciMax + cciPadding,
+          lineColor: AppColors.cciLine,
+          oscillatorType: 'cci',
+        ));
+      }
     }
 
     return Column(children: panels);
@@ -2109,6 +2008,12 @@ class _DetailScreenState extends State<DetailScreen> {
     if (dataPoints <= 120) return 10;
     if (dataPoints <= 240) return 20;
     return (dataPoints / 10).ceil();
+  }
+
+  // 基準表示データ数（ズーム1.0で表示する量）
+  // 全時間軸で100本を表示、左右スクロールで残りを閲覧可能
+  int _getBaseVisibleDataPoints() {
+    return 100;
   }
 
   // Y軸ラベル
@@ -2547,10 +2452,14 @@ class CandlestickPainter extends CustomPainter {
       // 本体の幅（データ量に応じて調整）
       final bodyWidth = (candleWidth * 0.7).clamp(2.0, 12.0);
 
+      // 実体の最小高さを確保（為替など変動が小さい場合でも見えるように）
+      final minBodyHeight = 4.0;
+      final actualBodyHeight = bodyHeight < minBodyHeight ? minBodyHeight : bodyHeight;
+
       final rect = Rect.fromCenter(
         center: Offset(x, (bodyTop + bodyBottom) / 2),
         width: bodyWidth,
-        height: bodyHeight < 1 ? 1 : bodyHeight,
+        height: actualBodyHeight,
       );
       canvas.drawRect(rect, bodyPaint);
     }
