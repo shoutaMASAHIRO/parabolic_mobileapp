@@ -4,6 +4,7 @@ import 'providers/auth_provider.dart';
 import 'screens/login_screen.dart';
 import 'screens/home_screen.dart';
 import 'theme/app_theme.dart';
+import 'theme/app_colors.dart';
 
 void main() {
   runApp(const MyApp());
@@ -20,7 +21,16 @@ class MyApp extends StatelessWidget {
         title: 'Parabolic',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.lightTheme(),
-        themeMode: ThemeMode.light,
+        darkTheme: ThemeData.dark().copyWith(
+          scaffoldBackgroundColor: AppColors.background,
+          colorScheme: ColorScheme.fromSeed(
+            seedColor: AppColors.primary,
+            brightness: Brightness.dark,
+            background: AppColors.background,
+            surface: AppColors.surface,
+          ),
+        ),
+        themeMode: ThemeMode.dark,
         home: const AuthWrapper(),
       ),
     );

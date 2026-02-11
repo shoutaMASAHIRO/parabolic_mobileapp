@@ -1,131 +1,88 @@
 import 'package:flutter/material.dart';
 
-/// フォーマル&モダンな白基調デザインのカラーパレット
+/// GMOコイン風のフォーマル&モダンなカラーパレット
+/// ダークモードを基本とし、視認性の高い配色を採用
 class AppColors {
-  AppColors._(); // プライベートコンストラクタ
+  AppColors._();
 
-  // ベースカラー
-  static const Color background = Color(0xFFFAFAFA); // ソフトホワイト
-  static const Color surface = Color(0xFFFFFFFF); // ピュアホワイト
-  static const Color primary = Color(0xFF1A365D); // ネイビーブルー（権威性）
+  // --- ダークテーマ用ベースカラー (GMO Coin Style) ---
+  static const Color background = Color(0xFF0D1117); // 深い黒
+  static const Color surface = Color(0xFF161B22);    // 少し明るい黒（カード等）
+  static const Color scaffoldBackground = Color(0xFF0D1117);
+  
+  // --- ブランドカラー ---
+  static const Color primary = Color(0xFF0052CC);    // 信頼感のあるブルー
+  static const Color primaryLight = Color(0xFF335CC5);
+  static const Color accent = Color(0xFF00A1E9);     // アクセントブルー
 
-  // テキストカラー
-  static const Color textPrimary = Color(0xFF1A202C); // ほぼ黒
-  static const Color textSecondary = Color(0xFF718096); // ミディアムグレー
+  // --- テキストカラー ---
+  static const Color textPrimary = Color(0xFFE6EDF3);   // ほぼ白
+  static const Color textSecondary = Color(0xFF8B949E); // グレー
+  static const Color textTertiary = Color(0xFF484F58);  // 濃いグレー
 
-  // ボーダー
-  static const Color borderLight = Color(0xFFE2E8F0); // サブトルボーダー
-  static const Color borderMedium = Color(0xFFCBD5E0); // ビジブルディバイダー
+  // --- 金融・チャートカラー (日本式: 赤=上昇, 青=下落) ---
+  static const Color rise = Color(0xFFFF3B30); // 鮮やかな赤 (上昇)
+  static const Color fall = Color(0xFF007AFF); // 鮮やかな青 (下落)
+  static const Color unchanged = Color(0xFF8E8E93);
 
-  // カテゴリーカラー（プロフェッショナル）
-  // 仮想通貨
-  static const Color cryptoPrimary = Color(0xFF2D3748); // チャコール
-  static const Color cryptoAccent = Color(0xFF4A5568); // スレートグレー
-  static const Color cryptoLight = Color(0xFFEDF2F7); // ライトグレー背景
+  // --- チャート背景 & グリッド ---
+  static const Color chartBackground = Color(0xFF0D1117);
+  static const Color chartGrid = Color(0xFF21262D);
+  static const Color axisLabel = Color(0xFF8B949E);
 
-  // 為替
-  static const Color forexPrimary = Color(0xFF276749); // フォレストグリーン
-  static const Color forexAccent = Color(0xFF38A169); // セージグリーン
-  static const Color forexLight = Color(0xFFE6FFFA); // ライトグリーン背景
+  // --- テクニカル指標 (視認性重視) ---
+  static const Color bbMiddle = Color(0xFFFFD60A);    // 黄色
+  static const Color emaShort = Color(0xFF30D158);    // 緑
+  static const Color emaMedium = Color(0xFF5E5CE6);   // 紫
+  static const Color emaLong = Color(0xFFFF9F0A);     // オレンジ
 
-  // 株式
-  static const Color stockPrimary = Color(0xFF2C5282); // コーポレートブルー
-  static const Color stockAccent = Color(0xFF3182CE); // スカイブルー
-  static const Color stockLight = Color(0xFFEBF8FF); // ライトブルー背景
+  // オシレーター
+  static const Color rsiLine = Color(0xFFBF5AF2);     // 明るい紫
+  static const Color macdLine = Color(0xFF0A84FF);    // 青
+  static const Color macdSignal = Color(0xFFFF9F0A);  // オレンジ
+  static const Color macdHistogramPositive = Color(0xFF32D74B);
+  static const Color macdHistogramNegative = Color(0xFFFF453A);
+  static const Color stochK = Color(0xFF0A84FF);      // ストキャスティクスK
+  static const Color stochD = Color(0xFFFF9F0A);      // ストキャスティクスD
+  static const Color cciLine = Color(0xFF00BCD4);     // CCI
 
-  // チャートカラー
-  static const Color chartBackground = Color(0xFFFAFAFA); // ソフトホワイト
-  static const Color gridLines = Color(0xFFE2E8F0); // ライトグレー
-  static const Color axisLabel = Color(0xFF4A5568); // ダークグレー
+  // その他
+  static const Color error = Color(0xFFFF453A);
+  static const Color success = Color(0xFF32D74B);
+  static const Color warning = Color(0xFFFF9F0A);
+  static const Color info = Color(0xFF0A84FF);
+  static const Color border = Color(0xFF30363D);
+  static const Color divider = Color(0xFF21262D);
 
-  // 陽線/陰線
-  static const Color bullish = Color(0xFF276749); // フォレストグリーン
-  static const Color bearish = Color(0xFFC53030); // プロフェッショナルレッド
-
-  // ボリンジャーバンド（グレートーン系）
-  static const Color bbMiddle = Color(0xFF718096); // ミディアムグレー
-  static const Color bb1Sigma = Color(0xFF94A3B8); // ライトグレー
-  static const Color bb2Sigma = Color(0xFFA0AEC0); // ベリーライトグレー
-
-  // EMA（ネイビーブルートーン系）
-  static const Color emaShort = Color(0xFF4299E1); // ライトブルー
-  static const Color emaMedium = Color(0xFF3182CE); // ミディアムブルー
-  static const Color emaLong = Color(0xFF2C5282); // ダークブルー
-
-  // RSI
-  static const Color rsiLine = Color(0xFF805AD5); // パープル
-  static const Color rsiOverbought = Color(0xFFE53E3E); // レッド（買われすぎ）
-  static const Color rsiOversold = Color(0xFF38A169); // グリーン（売られすぎ）
-
-  // MACD
-  static const Color macdLine = Color(0xFF3182CE); // ブルー
-  static const Color macdSignal = Color(0xFFED8936); // オレンジ
-  static const Color macdHistogramPositive = Color(0xFF38A169); // グリーン
-  static const Color macdHistogramNegative = Color(0xFFE53E3E); // レッド
-
-  // ストキャスティクス
-  static const Color stochK = Color(0xFF4299E1); // ライトブルー（%K）
-  static const Color stochD = Color(0xFFED8936); // オレンジ（%D）
-  static const Color stochOverbought = Color(0xFFE53E3E); // レッド（買われすぎ80）
-  static const Color stochOversold = Color(0xFF38A169); // グリーン（売られすぎ20）
-
-  // CCI
-  static const Color cciLine = Color(0xFF9F7AEA); // ライトパープル
-  static const Color cciUpperLevel = Color(0xFFE53E3E); // レッド（+100）
-  static const Color cciLowerLevel = Color(0xFF38A169); // グリーン（-100）
-
-  // フィードバックカラー
-  static const Color success = Color(0xFF276749); // フォレストグリーン
-  static const Color error = Color(0xFFC53030); // プロフェッショナルレッド
-  static const Color errorLight = Color(0xFFFED7D7); // ライトレッド背景
-  static const Color warning = Color(0xFFD69E2E); // アンバー
-  static const Color info = Color(0xFF2C5282); // ネイビーブルー
+  // 旧名称との互換性
+  static const Color bullish = rise;
+  static const Color bearish = fall;
+  static const Color crypto = Color(0xFFF7931A); 
+  static const Color forex = Color(0xFF2E7D32); 
+  static const Color stock = Color(0xFF1976D2);
+  static const Color cryptoLight = Color(0x33F7931A);
+  static const Color forexLight = Color(0x332E7D32);
+  static const Color stockLight = Color(0x331976D2);
+  static const Color cryptoPrimary = crypto;
+  static const Color forexPrimary = forex;
+  static const Color stockPrimary = stock;
+  static const Color borderLight = Color(0xFF30363D);
 }
 
 /// カテゴリー別のカラーユーティリティ
-/// Note: MarketCategoryはhome_screen.dartで定義されているenumを使用
 class CategoryColors {
-  CategoryColors._(); // プライベートコンストラクタ
+  CategoryColors._();
 
-  /// カテゴリー名からプライマリカラーを取得
   static Color forCategoryName(String categoryName) {
     switch (categoryName.toLowerCase()) {
       case 'crypto':
-        return AppColors.cryptoPrimary;
+        return AppColors.crypto;
       case 'forex':
-        return AppColors.forexPrimary;
+        return AppColors.forex;
       case 'stock':
-        return AppColors.stockPrimary;
+        return AppColors.stock;
       default:
         return AppColors.primary;
-    }
-  }
-
-  /// カテゴリー名からアクセントカラーを取得
-  static Color accentForCategoryName(String categoryName) {
-    switch (categoryName.toLowerCase()) {
-      case 'crypto':
-        return AppColors.cryptoAccent;
-      case 'forex':
-        return AppColors.forexAccent;
-      case 'stock':
-        return AppColors.stockAccent;
-      default:
-        return AppColors.primary;
-    }
-  }
-
-  /// カテゴリー名から背景カラーを取得
-  static Color backgroundForCategoryName(String categoryName) {
-    switch (categoryName.toLowerCase()) {
-      case 'crypto':
-        return AppColors.cryptoLight;
-      case 'forex':
-        return AppColors.forexLight;
-      case 'stock':
-        return AppColors.stockLight;
-      default:
-        return AppColors.background;
     }
   }
 }

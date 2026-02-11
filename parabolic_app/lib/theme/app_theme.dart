@@ -5,51 +5,76 @@ import 'app_colors.dart';
 class AppTheme {
   AppTheme._(); // プライベートコンストラクタ
 
-  /// フォーマル&モダンなライトテーマ
+  /// フォーマル&モダンなライトテーマ（GMOコイン風）
   static ThemeData lightTheme() {
     return ThemeData(
       // Material 3を使用
       useMaterial3: true,
 
       // カラースキーム
-      colorScheme: ColorScheme.light(
+      colorScheme: const ColorScheme.light(
         primary: AppColors.primary,
-        secondary: AppColors.primary,
+        secondary: AppColors.accent,
         surface: AppColors.surface,
         error: AppColors.error,
         onPrimary: Colors.white,
         onSecondary: Colors.white,
         onSurface: AppColors.textPrimary,
         onError: Colors.white,
+        background: AppColors.background,
+        onBackground: AppColors.textPrimary,
       ),
 
       // スキャフォールド背景色
-      scaffoldBackgroundColor: AppColors.background,
+      scaffoldBackgroundColor: AppColors.scaffoldBackground,
 
       // AppBarテーマ
-      appBarTheme: AppBarTheme(
+      appBarTheme: const AppBarTheme(
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.textPrimary,
         elevation: 0,
         centerTitle: true,
-        titleTextStyle: const TextStyle(
+        titleTextStyle: TextStyle(
           fontSize: 18,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.bold,
           color: AppColors.textPrimary,
         ),
-        iconTheme: const IconThemeData(
+        iconTheme: IconThemeData(
           color: AppColors.textPrimary,
+        ),
+        // 下線を引く場合などに使用
+        shape: Border(
+            bottom: BorderSide(
+          color: AppColors.border,
+          width: 1,
+        )),
+      ),
+
+      // BottomNavigationBarテーマ
+      bottomNavigationBarTheme: const BottomNavigationBarThemeData(
+        backgroundColor: AppColors.surface,
+        selectedItemColor: AppColors.primary,
+        unselectedItemColor: AppColors.textSecondary,
+        type: BottomNavigationBarType.fixed,
+        elevation: 8,
+        selectedLabelStyle: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w500,
         ),
       ),
 
       // カードテーマ
       cardTheme: const CardThemeData(
         color: AppColors.surface,
-        elevation: 2,
+        elevation: 0, // フラットなデザイン
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
-        ),
-        margin: EdgeInsets.only(bottom: 12),
+            side: BorderSide(color: AppColors.border),
+            borderRadius: BorderRadius.all(Radius.circular(4))),
+        margin: EdgeInsets.symmetric(vertical: 4, horizontal: 8),
       ),
 
       // ElevatedButtonテーマ
@@ -58,14 +83,13 @@ class AppTheme {
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
           elevation: 0,
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(4), // 角丸を少し小さく
           ),
           textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-            letterSpacing: 0.5,
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
           ),
         ),
       ),
@@ -76,8 +100,8 @@ class AppTheme {
           foregroundColor: AppColors.primary,
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           textStyle: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ),
@@ -87,9 +111,9 @@ class AppTheme {
         style: FilledButton.styleFrom(
           backgroundColor: AppColors.primary,
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.circular(4),
           ),
         ),
       ),
@@ -98,34 +122,34 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: AppColors.surface,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.borderLight),
+          borderRadius: BorderRadius.circular(4),
+          borderSide: const BorderSide(color: AppColors.border),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
-          borderSide: const BorderSide(color: AppColors.borderLight),
+          borderRadius: BorderRadius.circular(4),
+          borderSide: const BorderSide(color: AppColors.border),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(4),
           borderSide: const BorderSide(color: AppColors.primary, width: 2),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(4),
           borderSide: const BorderSide(color: AppColors.error),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(4),
           borderSide: const BorderSide(color: AppColors.error, width: 2),
         ),
         labelStyle: const TextStyle(
           color: AppColors.textSecondary,
-          fontSize: 16,
+          fontSize: 14,
         ),
         hintStyle: const TextStyle(
-          color: AppColors.textSecondary,
-          fontSize: 16,
+          color: AppColors.textTertiary,
+          fontSize: 14,
         ),
       ),
 
@@ -134,26 +158,28 @@ class AppTheme {
         backgroundColor: AppColors.primary,
         foregroundColor: Colors.white,
         elevation: 4,
+        shape: CircleBorder(),
       ),
 
       // Chipテーマ
       chipTheme: ChipThemeData(
-        backgroundColor: AppColors.borderLight,
-        selectedColor: AppColors.primary,
-        deleteIconColor: AppColors.textSecondary,
+        backgroundColor: AppColors.background,
+        selectedColor: AppColors.primaryLight.withOpacity(0.2),
+        checkmarkColor: AppColors.primary,
         labelStyle: const TextStyle(
           color: AppColors.textPrimary,
-          fontSize: 14,
+          fontSize: 12,
         ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(4),
+          side: const BorderSide(color: AppColors.border),
         ),
       ),
 
       // Dividerテーマ
       dividerTheme: const DividerThemeData(
-        color: AppColors.borderLight,
+        color: AppColors.divider,
         thickness: 1,
         space: 1,
       ),
@@ -162,69 +188,6 @@ class AppTheme {
       iconTheme: const IconThemeData(
         color: AppColors.textPrimary,
         size: 24,
-      ),
-
-      // CircularProgressIndicatorテーマ
-      progressIndicatorTheme: const ProgressIndicatorThemeData(
-        color: AppColors.primary,
-      ),
-
-      // SnackBarテーマ
-      snackBarTheme: SnackBarThemeData(
-        backgroundColor: AppColors.textPrimary,
-        contentTextStyle: const TextStyle(
-          color: Colors.white,
-          fontSize: 14,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        behavior: SnackBarBehavior.floating,
-      ),
-
-      // TabBarテーマ
-      tabBarTheme: const TabBarThemeData(
-        labelColor: AppColors.primary,
-        unselectedLabelColor: AppColors.textSecondary,
-        indicatorColor: AppColors.primary,
-        labelStyle: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w600,
-        ),
-        unselectedLabelStyle: TextStyle(
-          fontSize: 14,
-          fontWeight: FontWeight.w400,
-        ),
-      ),
-
-      // Dialogテーマ
-      dialogTheme: const DialogThemeData(
-        backgroundColor: AppColors.surface,
-        elevation: 8,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(16)),
-        ),
-        titleTextStyle: TextStyle(
-          fontSize: 20,
-          fontWeight: FontWeight.w600,
-          color: AppColors.textPrimary,
-        ),
-        contentTextStyle: TextStyle(
-          fontSize: 16,
-          color: AppColors.textPrimary,
-          height: 1.5,
-        ),
-      ),
-
-      // BottomSheetテーマ
-      bottomSheetTheme: const BottomSheetThemeData(
-        backgroundColor: AppColors.surface,
-        elevation: 8,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(
-            top: Radius.circular(20),
-          ),
-        ),
       ),
     );
   }

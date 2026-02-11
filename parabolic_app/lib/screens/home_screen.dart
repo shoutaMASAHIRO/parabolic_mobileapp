@@ -1,16 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:math'; // For mock data
 import '../providers/auth_provider.dart';
 import '../services/api_service.dart';
 import '../services/stock_service.dart';
+import '../services/chart_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/rate_list_item.dart';
 import 'login_screen.dart';
 import 'detail_screen.dart';
 
 // カテゴリ定義
 enum MarketCategory {
-  crypto('暗号通貨', Icons.currency_bitcoin),
-  forex('為替', Icons.currency_exchange),
+  crypto('暗号資産', Icons.currency_bitcoin),
+  forex('外国為替', Icons.currency_exchange),
   stock('株式', Icons.show_chart);
 
   final String label;
@@ -28,6 +31,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
   final ApiService _api = ApiService();
   final AssetService _assetService = AssetService();
+  final ChartService _chartService = ChartService();
   late TabController _tabController;
 
   // 各カテゴリのデータ
@@ -35,8 +39,13 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   List<dynamic> _forexData = [];
   List<dynamic> _stockData = [];
 
+  // 通知設定があるシンボルのセット
+  Set<String> _notifiedSymbols = {};
+
   bool _isLoading = true;
   String? _error;
+
+  int _currentIndex = 0; // BottomNav index
 
   @override
   void initState() {
@@ -70,23 +79,50 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       final stockResponse = results[2];
 
       if (cryptoResponse.isSuccess && forexResponse.isSuccess && stockResponse.isSuccess) {
-        setState(() {
-          _cryptoData = cryptoResponse.jsonList ?? [];
-          _forexData = forexResponse.jsonList ?? [];
-          _stockData = stockResponse.jsonList ?? [];
-          _isLoading = false;
-        });
+        final crypto = cryptoResponse.jsonList ?? [];
+        final forex = forexResponse.jsonList ?? [];
+        final stock = stockResponse.jsonList ?? [];
+
+        // 全てのシンボルの通知設定をチェック（本来は一括取得APIが望ましいが、既存サービスを利用）
+        final allSymbols = [
+          ...crypto.map((e) => e is Map ? e['symbol'] as String : e.toString()),
+          ...forex.map((e) => e is Map ? e['symbol'] as String : e.toString()),
+          ...stock.map((e) => e is Map ? e['symbol'] as String : e.toString()),
+        ];
+
+        final notified = <String>{};
+        // 並列で各シンボルの閾値設定を確認
+        await Future.wait(allSymbols.map((symbol) async {
+          final thresholds = await _chartService.getAllThresholdsFromServer(symbol);
+          if (thresholds.isNotEmpty) {
+            notified.add(symbol);
+          }
+        }));
+
+        if (mounted) {
+          setState(() {
+            _cryptoData = crypto;
+            _forexData = forex;
+            _stockData = stock;
+            _notifiedSymbols = notified;
+            _isLoading = false;
+          });
+        }
       } else {
+        if (mounted) {
+          setState(() {
+            _error = 'Failed to load data';
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
         setState(() {
-          _error = 'Failed to load data';
+          _error = e.toString();
           _isLoading = false;
         });
       }
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
     }
   }
 
@@ -101,59 +137,86 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
 
   @override
   Widget build(BuildContext context) {
-    final user = context.watch<AuthProvider>().user;
-
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Parabolic'),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (value) {
-              if (value == 'logout') {
-                _handleLogout();
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'profile',
-                child: Row(
-                  children: [
-                    const Icon(Icons.person, size: 20),
-                    const SizedBox(width: 8),
-                    Text(user?.username ?? 'User'),
+      backgroundColor: AppColors.scaffoldBackground,
+      appBar: _currentIndex == 0
+          ? AppBar(
+              title: const Text('Parabolic'),
+              elevation: 0,
+              bottom: TabBar(
+                controller: _tabController,
+                labelColor: AppColors.primary,
+                unselectedLabelColor: AppColors.textSecondary,
+                indicatorColor: AppColors.primary,
+                indicatorWeight: 3,
+                labelStyle: const TextStyle(fontWeight: FontWeight.bold),
+                tabs: MarketCategory.values
+                    .map((cat) => Tab(text: cat.label)) // アイコンなし、テキストのみでスッキリさせる
+                    .toList(),
+              ),
+              actions: [
+                IconButton(
+                  icon: const Icon(Icons.notifications_none),
+                  onPressed: () {},
+                ),
+                PopupMenuButton<String>(
+                  onSelected: (value) {
+                    if (value == 'logout') {
+                      _handleLogout();
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    const PopupMenuItem(
+                      value: 'logout',
+                      child: Row(
+                        children: [
+                          Icon(Icons.logout, size: 20),
+                          SizedBox(width: 8),
+                          Text('ログアウト'),
+                        ],
+                      ),
+                    ),
                   ],
                 ),
-              ),
-              const PopupMenuDivider(),
-              const PopupMenuItem(
-                value: 'logout',
-                child: Row(
-                  children: [
-                    Icon(Icons.logout, size: 20),
-                    SizedBox(width: 8),
-                    Text('ログアウト'),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            )
+          : null, // ホーム以外はAppBarを変えるか隠す（今回は簡易実装）
+      body: _buildBody(),
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _currentIndex,
+        onTap: (index) {
+          setState(() {
+            _currentIndex = index;
+          });
+        },
+        items: const [
+          BottomNavigationBarItem(
+            icon: Icon(Icons.home),
+            label: 'ホーム',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.show_chart),
+            label: '保有/履歴', // GMO風
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.account_circle),
+            label: 'アカウント',
           ),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          tabs: MarketCategory.values.map((cat) => Tab(
-            icon: Icon(cat.icon),
-            text: cat.label,
-          )).toList(),
-        ),
-      ),
-      body: RefreshIndicator(
-        onRefresh: _loadData,
-        child: _buildBody(),
       ),
     );
   }
 
   Widget _buildBody() {
+    if (_currentIndex != 0) {
+      return Center(
+        child: Text(
+          _currentIndex == 1 ? '保有/履歴画面 (未実装)' : 'アカウント画面 (未実装)',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
+      );
+    }
+
     if (_isLoading) {
       return const Center(
         child: CircularProgressIndicator(),
@@ -181,80 +244,89 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     return TabBarView(
       controller: _tabController,
       children: [
-        _buildCryptoList(),
-        _buildForexList(),
-        _buildStockList(),
+        _buildAssetList(MarketCategory.crypto, _cryptoData),
+        _buildAssetList(MarketCategory.forex, _forexData),
+        _buildAssetList(MarketCategory.stock, _stockData),
       ],
     );
   }
 
-  Widget _buildCryptoList() {
+  Widget _buildAssetList(MarketCategory category, List<dynamic> data) {
     return Column(
       children: [
+        // ヘッダー行 (GMO風)
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          color: AppColors.background,
+          child: const Row(
+            children: [
+              Expanded(flex: 3, child: Text('銘柄', style: TextStyle(fontSize: 12, color: AppColors.textSecondary))),
+              Expanded(flex: 4, child: Text('現在地', textAlign: TextAlign.right, style: TextStyle(fontSize: 12, color: AppColors.textSecondary))),
+              Expanded(flex: 3, child: Text('前日比', textAlign: TextAlign.right, style: TextStyle(fontSize: 12, color: AppColors.textSecondary))),
+            ],
+          ),
+        ),
         Expanded(
-          child: _cryptoData.isEmpty
-              ? const Center(child: Text('暗号通貨データがありません'))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _cryptoData.length,
-                  itemBuilder: (context, index) {
-                    final item = _cryptoData[index];
-                    final symbol = item is Map ? item['symbol'] as String : item.toString();
-                    final displayName = item is Map
-                        ? item['displayName'] as String
-                        : symbol.replaceAll('-USD', '');
-                    final description = item is Map
-                        ? item['description'] as String
-                        : symbol;
+          child: data.isEmpty
+              ? Center(child: Text('${category.label}データがありません'))
+              : RefreshIndicator(
+                  onRefresh: _loadData,
+                  child: ListView.builder(
+                    itemCount: data.length,
+                    itemBuilder: (context, index) {
+                      final item = data[index];
+                      final symbol = item is Map ? item['symbol'] as String : item.toString();
+                      final displayName = item is Map
+                          ? item['displayName'] as String
+                          : symbol.replaceAll('-USD', '');
+                      
+                      // Mock Data Generation for Visuals
+                      // TODO: Replace with real data when API provides it
+                      final random = Random(symbol.hashCode);
+                      final price = _generateMockPrice(category, random);
+                      final change = _generateMockChange(price, random);
+                      final changePercent = _generateMockChangePercent(change, price);
 
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: AppColors.cryptoLight,
-                          child: const Icon(Icons.currency_bitcoin, color: AppColors.cryptoPrimary),
-                        ),
-                        title: Text(
-                          displayName,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text(description),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: Icon(Icons.delete_outline, color: Colors.grey.shade600),
-                              onPressed: () => _deleteCrypto(symbol, displayName),
-                              tooltip: '削除',
-                            ),
-                            const Icon(Icons.chevron_right),
-                          ],
-                        ),
-                        onTap: () {
-                          Navigator.of(context).push(
+                      return RateListItem(
+                        symbol: symbol,
+                        name: displayName,
+                        price: price,
+                        change: change,
+                        changePercent: changePercent,
+                        icon: category.icon,
+                        iconColor: CategoryColors.forCategoryName(category.name),
+                        hasNotification: _notifiedSymbols.contains(symbol),
+                        onTap: () async {
+                          final result = await Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => DetailScreen(
                                 symbol: symbol,
-                                category: MarketCategory.crypto,
+                                category: category,
                               ),
                             ),
                           );
+                          
+                          if (result is MarketCategory) {
+                            _tabController.animateTo(result.index);
+                          }
+                          _loadData(); // 詳細画面から戻った時に通知設定を再読み込み
                         },
-                      ),
-                    );
-                  },
+                      );
+                    },
+                  ),
                 ),
         ),
         Padding(
           padding: const EdgeInsets.all(16),
           child: SizedBox(
             width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => _showAssetSearch(MarketCategory.crypto),
+            child: OutlinedButton.icon(
+              onPressed: () => _showAssetSearch(category),
               icon: const Icon(Icons.add),
-              label: const Text('暗号通貨を追加'),
-              style: ElevatedButton.styleFrom(
+              label: Text('${category.label}を追加'),
+              style: OutlinedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 12),
+                side: const BorderSide(color: AppColors.border),
               ),
             ),
           ),
@@ -263,274 +335,42 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildForexList() {
-    return Column(
-      children: [
-        Expanded(
-          child: _forexData.isEmpty
-              ? const Center(child: Text('為替データがありません'))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _forexData.length,
-                  itemBuilder: (context, index) {
-                    final item = _forexData[index];
-                    final symbol = item is Map ? item['symbol'] as String : item.toString();
-                    final displayName = item is Map ? item['displayName'] as String : item.toString();
-                    final description = item is Map ? item['description'] as String : '為替';
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: AppColors.forexLight,
-                          child: const Icon(Icons.currency_exchange, color: AppColors.forexPrimary),
-                        ),
-                        title: Text(
-                          displayName,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text(description),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: Icon(Icons.delete_outline, color: Colors.grey.shade600),
-                              onPressed: () => _deleteForex(symbol, displayName),
-                              tooltip: '削除',
-                            ),
-                            const Icon(Icons.chevron_right),
-                          ],
-                        ),
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => DetailScreen(
-                                symbol: symbol,
-                                category: MarketCategory.forex,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    );
-                  },
-                ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => _showAssetSearch(MarketCategory.forex),
-              icon: const Icon(Icons.add),
-              label: const Text('為替ペアを追加'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStockList() {
-    return Column(
-      children: [
-        Expanded(
-          child: _stockData.isEmpty
-              ? const Center(child: Text('株式データがありません'))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _stockData.length,
-                  itemBuilder: (context, index) {
-                    final item = _stockData[index];
-                    // APIからのデータはMapで返ってくる
-                    final symbol = item is Map ? item['symbol'] as String : item.toString();
-                    final displayName = item is Map ? item['displayName'] as String : item.toString();
-                    final description = item is Map ? item['description'] as String : '株式';
-
-                    return Card(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      child: ListTile(
-                        leading: CircleAvatar(
-                          backgroundColor: AppColors.stockLight,
-                          child: const Icon(Icons.show_chart, color: AppColors.stockPrimary),
-                        ),
-                        title: Text(
-                          displayName,
-                          style: const TextStyle(fontWeight: FontWeight.bold),
-                        ),
-                        subtitle: Text(description),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            IconButton(
-                              icon: Icon(Icons.delete_outline, color: Colors.grey.shade600),
-                              onPressed: () => _deleteStock(symbol, displayName),
-                              tooltip: '削除',
-                            ),
-                            const Icon(Icons.chevron_right),
-                          ],
-                        ),
-                        onTap: () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => DetailScreen(
-                                symbol: symbol,
-                                category: MarketCategory.stock,
-                              ),
-                            ),
-                          );
-                        },
-                      ),
-                    );
-                  },
-                ),
-        ),
-        // 銘柄を検索ボタン
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => _showAssetSearch(MarketCategory.stock),
-              icon: const Icon(Icons.add),
-              label: const Text('銘柄を追加'),
-              style: ElevatedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // 暗号通貨を削除
-  Future<void> _deleteCrypto(String symbol, String displayName) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('暗号通貨を削除'),
-        content: Text('$displayName をリストから削除しますか？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('削除'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      final success = await _assetService.hideCrypto(symbol);
-      if (success && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$displayName を削除しました'),
-            duration: const Duration(seconds: 1),
-          ),
-        );
-        _loadData();
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('削除に失敗しました'),
-            duration: Duration(seconds: 1),
-          ),
-        );
-      }
+  // --- Mock Data Helpers ---
+  String _generateMockPrice(MarketCategory category, Random random) {
+    switch (category) {
+      case MarketCategory.crypto:
+        if (random.nextBool()) {
+          // BTC like
+          return '¥${(4000000 + random.nextInt(5000000)).toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}';
+        } else {
+          // Other like
+          return '¥${(1000 + random.nextInt(90000)).toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}';
+        }
+      case MarketCategory.forex:
+        return '${(100 + random.nextInt(50))}.${(random.nextInt(99)).toString().padLeft(2, '0')}';
+      case MarketCategory.stock:
+        return '¥${(1000 + random.nextInt(9000)).toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}';
     }
   }
 
-  // 為替を削除
-  Future<void> _deleteForex(String symbol, String displayName) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('為替ペアを削除'),
-        content: Text('$displayName をリストから削除しますか？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('削除'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      final success = await _assetService.hideForex(symbol);
-      if (success && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$displayName を削除しました'),
-            duration: const Duration(seconds: 1),
-          ),
-        );
-        _loadData();
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('削除に失敗しました'),
-            duration: Duration(seconds: 1),
-          ),
-        );
-      }
-    }
+  String _generateMockChange(String priceStr, Random random) {
+     double priceVal = double.tryParse(priceStr.replaceAll('¥', '').replaceAll(',', '')) ?? 1000;
+     double change = priceVal * (random.nextDouble() * 0.04 - 0.02); // -2% to +2%
+     String sign = change >= 0 ? '+' : '';
+     return '$sign${change.toStringAsFixed(categoryDecimals(priceStr))}';
   }
 
-  // 株式を削除
-  Future<void> _deleteStock(String symbol, String displayName) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('銘柄を削除'),
-        content: Text('$displayName をリストから削除しますか？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('削除'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      final success = await _assetService.hideStock(symbol);
-      if (success && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$displayName を削除しました'),
-            duration: const Duration(seconds: 1),
-          ),
-        );
-        _loadData();
-      } else if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('削除に失敗しました'),
-            duration: Duration(seconds: 1),
-          ),
-        );
-      }
-    }
+   String _generateMockChangePercent(String changeStr, String priceStr) {
+     double change = double.tryParse(changeStr) ?? 0;
+     double price = double.tryParse(priceStr.replaceAll('¥', '').replaceAll(',', '')) ?? 1000;
+     double percent = (change / price) * 100;
+     String sign = percent >= 0 ? '+' : '';
+     return '$sign${percent.toStringAsFixed(2)}%';
+  }
+  
+  int categoryDecimals(String val) {
+    if (val.contains('.')) return 2;
+    return 0;
   }
 
   // 資産検索ダイアログを表示
@@ -558,9 +398,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      backgroundColor: Colors.transparent, // テーマの丸みを見せるため
       builder: (context) => _AssetSearchSheet(
         assetService: _assetService,
         category: category,
@@ -597,6 +435,7 @@ class _AssetSearchSheetState extends State<_AssetSearchSheet> {
   bool _isSearching = false;
   String? _lastQuery;
 
+  // ... (Keep existing getter logic)
   String get _title {
     switch (widget.category) {
       case MarketCategory.crypto:
@@ -611,46 +450,17 @@ class _AssetSearchSheetState extends State<_AssetSearchSheet> {
   String get _hintText {
     switch (widget.category) {
       case MarketCategory.crypto:
-        return '暗号通貨名を入力 (例: BTC, Bitcoin)';
+        return 'BTC, Bitcoinなど';
       case MarketCategory.forex:
-        return '通貨ペアを入力 (例: USD, JPY, EUR)';
+        return 'USD, JPYなど';
       case MarketCategory.stock:
-        return '銘柄コードまたは会社名を入力';
+        return '銘柄コード, 会社名';
     }
   }
+  
+  // ignore: unused_element
+  Color get _categoryColor => CategoryColors.forCategoryName(widget.category.name);
 
-  String get _exampleText {
-    switch (widget.category) {
-      case MarketCategory.crypto:
-        return '例: BTC, ETH, Bitcoin, Ethereum';
-      case MarketCategory.forex:
-        return '例: USD, JPY, EUR, GBP';
-      case MarketCategory.stock:
-        return '例: 7203, トヨタ, AAPL, Apple';
-    }
-  }
-
-  Color get _categoryColor {
-    switch (widget.category) {
-      case MarketCategory.crypto:
-        return AppColors.cryptoPrimary;
-      case MarketCategory.forex:
-        return AppColors.forexPrimary;
-      case MarketCategory.stock:
-        return AppColors.stockPrimary;
-    }
-  }
-
-  IconData get _categoryIcon {
-    switch (widget.category) {
-      case MarketCategory.crypto:
-        return Icons.currency_bitcoin;
-      case MarketCategory.forex:
-        return Icons.currency_exchange;
-      case MarketCategory.stock:
-        return Icons.show_chart;
-    }
-  }
 
   @override
   void dispose() {
@@ -722,65 +532,51 @@ class _AssetSearchSheetState extends State<_AssetSearchSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return DraggableScrollableSheet(
-      initialChildSize: 0.7,
-      minChildSize: 0.5,
-      maxChildSize: 0.95,
-      expand: false,
-      builder: (context, scrollController) => Column(
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: EdgeInsets.only(
+        top: 16,
+        left: 16,
+        right: 16,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            margin: const EdgeInsets.symmetric(vertical: 8),
+           Container(
             width: 40,
             height: 4,
+            margin: const EdgeInsets.only(bottom: 16),
             decoration: BoxDecoration(
               color: Colors.grey.shade300,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: Row(
-              children: [
-                Icon(Icons.search, color: _categoryColor),
-                const SizedBox(width: 8),
-                Text(
-                  _title,
-                  style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const Spacer(),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ],
-            ),
+          Text(
+            _title,
+            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
           ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                hintText: _hintText,
-                prefixIcon: const Icon(Icons.search),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: const Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          _performSearch('');
-                        },
-                      )
-                    : null,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              ),
-              onChanged: (value) {
+          const SizedBox(height: 16),
+          TextField(
+            controller: _searchController,
+            decoration: InputDecoration(
+              hintText: _hintText,
+              prefixIcon: const Icon(Icons.search),
+              suffixIcon: _searchController.text.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear),
+                      onPressed: () {
+                        _searchController.clear();
+                        _performSearch('');
+                      },
+                    )
+                  : null,
+            ),
+             onChanged: (value) {
+                // Debounce
                 Future.delayed(const Duration(milliseconds: 300), () {
                   if (_searchController.text == value) {
                     _performSearch(value);
@@ -788,121 +584,54 @@ class _AssetSearchSheetState extends State<_AssetSearchSheet> {
                 });
                 setState(() {});
               },
-              onSubmitted: _performSearch,
-              textInputAction: TextInputAction.search,
+          ),
+          const SizedBox(height: 16),
+          if (_isSearching)
+            const LinearProgressIndicator()
+          else if (_searchResults.isNotEmpty)
+            Flexible(
+              child: Container(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.4,
+                ),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: _searchResults.length,
+                  itemBuilder: (context, index) {
+                    final item = _searchResults[index];
+                    final symbol = item['symbol'];
+                    final name = item['displayName'];
+                    final isAdded = widget.currentSymbols.contains(symbol);
+
+                    return ListTile(
+                      title: Text(name),
+                      subtitle: Text(symbol),
+                      trailing: isAdded
+                          ? const Icon(Icons.check_circle, color: AppColors.success)
+                          : ElevatedButton(
+                              onPressed: () async {
+                                final success = await _addAsset(
+                                  symbol,
+                                  name,
+                                  item['description'] ?? '',
+                                );
+                                if (success && mounted) {
+                                  widget.onAssetAdded();
+                                  setState(() {});
+                                }
+                              },
+                              style: ElevatedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 16),
+                              ),
+                              child: const Text('追加'),
+                            ),
+                    );
+                  },
+                ),
+              ),
             ),
-          ),
-          const Divider(height: 1),
-          Expanded(
-            child: _buildSearchResults(scrollController),
-          ),
         ],
       ),
-    );
-  }
-
-  Widget _buildSearchResults(ScrollController scrollController) {
-    if (_isSearching) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_searchController.text.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.search, size: 64, color: AppColors.textSecondary.withOpacity(0.5)),
-            const SizedBox(height: 16),
-            Text(
-              _hintText,
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 16),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              _exampleText,
-              style: TextStyle(color: AppColors.textSecondary.withOpacity(0.7), fontSize: 14),
-            ),
-          ],
-        ),
-      );
-    }
-
-    if (_searchResults.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.search_off, size: 64, color: AppColors.textSecondary.withOpacity(0.5)),
-            const SizedBox(height: 16),
-            Text(
-              '検索結果がありません',
-              style: const TextStyle(color: AppColors.textSecondary, fontSize: 16),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      controller: scrollController,
-      itemCount: _searchResults.length,
-      itemBuilder: (context, index) {
-        final asset = _searchResults[index];
-        final symbol = asset['symbol'] as String;
-        final displayName = asset['displayName'] as String;
-        final description = asset['description'] as String? ?? '';
-        final isAdded = widget.currentSymbols.contains(symbol);
-
-        return ListTile(
-          leading: CircleAvatar(
-            backgroundColor: isAdded
-                ? AppColors.borderLight
-                : _categoryColor.withOpacity(0.15),
-            child: Icon(
-              _categoryIcon,
-              color: isAdded ? AppColors.textSecondary : _categoryColor,
-            ),
-          ),
-          title: Text(
-            displayName,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: isAdded ? AppColors.textSecondary : null,
-            ),
-          ),
-          subtitle: Text(
-            '$symbol • $description',
-            style: TextStyle(color: isAdded ? AppColors.textSecondary : null),
-          ),
-          trailing: isAdded
-              ? const Icon(Icons.check, color: AppColors.success)
-              : Icon(Icons.add, color: _categoryColor),
-          onTap: isAdded
-              ? null
-              : () async {
-                  final success = await _addAsset(symbol, displayName, description);
-                  if (mounted) {
-                    if (success) {
-                      Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('$displayName を追加しました'),
-                          duration: const Duration(seconds: 1),
-                        ),
-                      );
-                      widget.onAssetAdded();
-                    } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('追加に失敗しました'),
-                          duration: Duration(seconds: 1),
-                        ),
-                      );
-                    }
-                  }
-                },
-        );
-      },
     );
   }
 }
