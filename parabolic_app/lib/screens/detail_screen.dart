@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -11,6 +11,7 @@ import '../services/chart_service.dart';
 import '../services/cross_detection_service.dart';
 import '../services/memo_service.dart';
 import '../theme/app_colors.dart';
+import '../widgets/chart_painters.dart';
 import 'memo_screen.dart';
 import 'home_screen.dart' show MarketCategory;
 
@@ -57,7 +58,11 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
 
   Offset? _crosshairPosition;
   int? _crosshairIndex;
-  bool _showCrosshair = false;
+    bool _showCrosshair = false;
+    double? _touchedPrice;
+    DateTime? _touchedDateTime;
+    Map<String, double?> _touchedIndicatorLevels = {}; 
+   // 各インジケーターごとのタッチ位置
   int _memoCount = 0;
   final Set<String> _sentNotifications = {};
   Map<String, double> _allIntervalThresholds = {};
@@ -104,6 +109,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
   List<CrossEvent> _crossHistory = [];
   double? _threshold;
   bool _emailNotificationEnabled = false;
+  bool _isMaximizedChart = false;
 
   @override
   void initState() {
@@ -319,29 +325,38 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.chartBackground,
-      appBar: AppBar(
-        elevation: 0,
-        scrolledUnderElevation: 0,
-        backgroundColor: AppColors.chartBackground,
-        titleSpacing: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-          onPressed: () => Navigator.of(context).pop(),
+      appBar: PreferredSize(
+        preferredSize: Size.fromHeight(_isMaximizedChart ? 0 : kToolbarHeight),
+        child: AnimatedOpacity(
+          duration: const Duration(milliseconds: 300),
+          opacity: _isMaximizedChart ? 0 : 1,
+          child: _isMaximizedChart 
+              ? const SizedBox.shrink() 
+              : AppBar(
+                  elevation: 0,
+                  scrolledUnderElevation: 0,
+                  backgroundColor: AppColors.chartBackground,
+                  titleSpacing: 0,
+                  leading: IconButton(
+                    icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+                    onPressed: () => Navigator.of(context).pop(),
+                  ),
+                  title: GestureDetector(
+                    onTap: () => Navigator.of(context).pop(),
+                    child: Text(
+                      '${widget.category.label}一覧',
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  actions: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: _buildTimerWidget(),
+                    ),
+                    IconButton(icon: const Icon(Icons.logout), tooltip: 'ログアウト', onPressed: () => _handleLogout()),
+                  ],
+                ),
         ),
-        title: GestureDetector(
-          onTap: () => Navigator.of(context).pop(),
-          child: Text(
-            '${widget.category.label}一覧',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-          ),
-        ),
-        actions: [
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: _buildTimerWidget(),
-          ),
-          IconButton(icon: const Icon(Icons.logout), tooltip: 'ログアウト', onPressed: () => _handleLogout()),
-        ],
       ),
       body: _buildBody(),
       bottomNavigationBar: _buildFooter(),
@@ -363,13 +378,20 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       Text(_error!, textAlign: TextAlign.center), const SizedBox(height: 16),
       ElevatedButton(onPressed: _loadData, child: const Text('再試行')),
     ]));
-    if (_candles.isEmpty) return const Center(child: Text('データがありません'));
+    if (_candles.isEmpty) return const Center(child: Text('データがないため、現在表示できません'));
 
     return SafeArea(
       bottom: false,
       child: Column(
         children: [
-          _buildSymbolHeader(),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeInOut,
+            child: SizedBox(
+              height: _isMaximizedChart ? 0 : null,
+              child: _isMaximizedChart ? const SizedBox.shrink() : _buildSymbolHeader(),
+            ),
+          ),
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -381,7 +403,14 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
                     ],
                   ),
                 ),
-                _buildRightToolbar(),
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 300),
+                  curve: Curves.easeInOut,
+                  width: _isMaximizedChart ? 0 : 60,
+                  decoration: const BoxDecoration(), // clipBehavior使用時はdecorationが必要
+                  clipBehavior: Clip.antiAlias,
+                  child: _buildRightToolbar(),
+                ),
               ],
             ),
           ),
@@ -680,7 +709,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
   }
 
   Widget _buildLineChart(List<Candle> candles) {
-    int maxP = 0; if (_showBB) maxP = max(maxP, _bbPeriod); if (_showEMA) maxP = max(maxP, max(_emaPeriod1, max(_emaPeriod2, _emaPeriod3)));
+    int maxP = 0; if (_showBB) maxP = math.max(maxP, _bbPeriod); if (_showEMA) maxP = math.max(maxP, math.max(_emaPeriod1, math.max(_emaPeriod2, _emaPeriod3)));
     final int startO = (maxP > 0) ? maxP - 1 : 0;
     final display = (startO > 0 && candles.length > startO) ? candles.sublist(startO) : candles;
     if (display.isEmpty) return const Center(child: Text('データ不足'));
@@ -736,33 +765,34 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       lineBars.add(_createIndicatorLine(TechnicalIndicators.calculateEMA(prices, _emaPeriod2).sublist(startO), display.length, AppColors.emaMedium, 1.2));
       lineBars.add(_createIndicatorLine(TechnicalIndicators.calculateEMA(prices, _emaPeriod3).sublist(startO), display.length, AppColors.emaLong, 1.2));
     }
-    return Column(children: [
-      Expanded(flex: 3, child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Expanded(child: _buildInteractiveChartWrapper(chartHeight: double.infinity, visibleCandles: visibleCandles, visibleStartIdx: visibleStart, child: LayoutBuilder(builder: (c, cs) => DecoratedBox(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4, right: 8),
+      child: Column(children: [
+        Expanded(flex: 3, child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Expanded(child: _buildInteractiveChartWrapper(chartHeight: double.infinity, visibleCandles: visibleCandles, visibleStartIdx: visibleStart, child: LayoutBuilder(builder: (c, cs) => Container(
           decoration: const BoxDecoration(
             border: Border(
-              right: BorderSide(color: AppColors.chartGrid, width: 1.2),
               bottom: BorderSide(color: AppColors.chartGrid, width: 1.2),
             ),
           ),
           child: Stack(children: [
-            CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: ChartGridPainter(dataLength: visibleCandles.length, xLabelInterval: xInt, minY: adjMinY, maxY: adjMaxY, startIndex: visibleStart)),
+            CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: ChartGridPainter(dataLength: visibleCandles.length, xLabelInterval: xInt, minY: adjMinY, maxY: adjMaxY, startIndex: visibleStart, latestPrice: _candles.isNotEmpty ? _candles.last.close : null, touchedPrice: _touchedPrice, touchedDateTime: _touchedDateTime, candles: visibleCandles)),
             LineChart(LineChartData(gridData: const FlGridData(show: false), titlesData: const FlTitlesData(show: false), borderData: FlBorderData(show: false), minX: pan, maxX: pan + visible - 1, minY: adjMinY, maxY: adjMaxY, lineBarsData: lineBars, clipData: const FlClipData.all(), lineTouchData: const LineTouchData(enabled: false))),
           ]),
         )))),
         _buildYAxisLabels(adjMinY, adjMaxY),
       ])),
-      if (_hasActiveOscillator) Flexible(flex: 1, child: SingleChildScrollView(child: _buildOscillatorPanels(candles, originalStart, originalEnd, xInt, visibleStart))),
+      if (_hasActiveOscillator) Flexible(flex: 1, child: ScrollConfiguration(behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false), child: SingleChildScrollView(child: _buildOscillatorPanels(candles, originalStart, originalEnd, xInt, visibleStart)))),
       Row(children: [
         Expanded(child: _buildXAxisLabels(visibleCandles, xInt, visibleStart)),
         const SizedBox(width: 55),
       ]),
       if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length) _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
-    ]);
+    ]));
   }
 
   Widget _buildCandlestickChart(List<Candle> candles) {
-    int maxP = 0; if (_showBB) maxP = max(maxP, _bbPeriod); if (_showEMA) maxP = max(maxP, max(_emaPeriod1, max(_emaPeriod2, _emaPeriod3)));
+    int maxP = 0; if (_showBB) maxP = math.max(maxP, _bbPeriod); if (_showEMA) maxP = math.max(maxP, math.max(_emaPeriod1, math.max(_emaPeriod2, _emaPeriod3)));
     final int startO = (maxP > 0) ? maxP - 1 : 0;
     final display = (startO > 0 && candles.length > startO) ? candles.sublist(startO) : candles;
     if (display.isEmpty) return const Center(child: Text('データ不足'));
@@ -797,53 +827,80 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
     final adjMinY = vMinY - pad + (yR * _chartPanOffsetY * 0.5);
     final adjMaxY = vMaxY + pad + (yR * _chartPanOffsetY * 0.5);
     final xInt = _calculateXLabelInterval(visibleCandles.length);
-    return Column(children: [
-      Expanded(flex: 3, child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Expanded(child: _buildInteractiveChartWrapper(chartHeight: double.infinity, visibleCandles: visibleCandles, visibleStartIdx: visibleStart, child: LayoutBuilder(builder: (c, cs) => DecoratedBox(
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 4, right: 8),
+      child: Column(children: [
+        Expanded(flex: 3, child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Expanded(child: _buildInteractiveChartWrapper(chartHeight: double.infinity, visibleCandles: visibleCandles, visibleStartIdx: visibleStart, child: LayoutBuilder(builder: (c, cs) => Container(
           decoration: const BoxDecoration(
             border: Border(
-              right: BorderSide(color: AppColors.chartGrid, width: 1.2),
               bottom: BorderSide(color: AppColors.chartGrid, width: 1.2),
             ),
           ),
-          child: CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: CandlestickPainter(candles: visibleCandles, minY: adjMinY, maxY: adjMaxY, bb: vBB, emaLines: vEMA, startIndex: visibleStart, xLabelInterval: xInt, indicatorStartIndex: 0)),
+          child: Stack(children: [
+            CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: ChartGridPainter(dataLength: visibleCandles.length, xLabelInterval: xInt, minY: adjMinY, maxY: adjMaxY, startIndex: visibleStart, latestPrice: _candles.isNotEmpty ? _candles.last.close : null, touchedPrice: _touchedPrice, touchedDateTime: _touchedDateTime, candles: visibleCandles)),
+            CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: CandlestickPainter(candles: visibleCandles, minY: adjMinY, maxY: adjMaxY, bb: vBB, emaLines: vEMA, startIndex: visibleStart, xLabelInterval: xInt, indicatorStartIndex: 0)),
+          ]),
         )))),
         _buildYAxisLabels(adjMinY, adjMaxY),
       ])),
-      if (_hasActiveOscillator) Flexible(flex: 1, child: SingleChildScrollView(child: _buildOscillatorPanels(candles, originalStart, originalEnd, xInt, visibleStart))),
+      if (_hasActiveOscillator) Flexible(flex: 1, child: ScrollConfiguration(behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false), child: SingleChildScrollView(child: _buildOscillatorPanels(candles, originalStart, originalEnd, xInt, visibleStart)))),
       Row(children: [
         Expanded(child: _buildXAxisLabels(visibleCandles, xInt, visibleStart)),
         const SizedBox(width: 55),
       ]),
       if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length) _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
-    ]);
+    ]));
   }
 
   Widget _buildInteractiveChartWrapper({required double chartHeight, required List<Candle> visibleCandles, required int visibleStartIdx, required Widget child}) {
-    return GestureDetector(
-      onVerticalDragStart: (d) {},
-      onScaleStart: (d) { _scrollAnimationController.stop(); _lastScaleStart = _chartZoom; _lastFocalPoint = d.focalPoint; },
-      onScaleUpdate: (d) {
-        setState(() {
-          if (_lastScaleStart != null && d.scale != 1.0) _chartZoom = (_lastScaleStart! * d.scale).clamp(_minZoom, _maxZoom);
-          if (d.scale == 1.0 && _lastFocalPoint != null) {
-            final double dx = d.focalPoint.dx - _lastFocalPoint!.dx;
-            final double dy = d.focalPoint.dy - _lastFocalPoint!.dy;
-            final double w = MediaQuery.of(context).size.width - 120;
-            if (w > 0) { _chartPanOffsetX = (_chartPanOffsetX - (dx / w) / _chartZoom).clamp(0.0, 1.0); _scrollVelocity = -(dx / w) / _chartZoom; }
-            _chartPanOffsetY = (_chartPanOffsetY + (dy / 100 / _chartZoom)).clamp(-1.5, 1.5);
-          }
-          _lastFocalPoint = d.focalPoint;
-        });
+    return Listener(
+      onPointerDown: (event) {
+        final x = event.localPosition.dx;
+        final w = MediaQuery.of(context).size.width - 120;
+        if (visibleCandles.isNotEmpty && w > 0) {
+          final int idx = (x / (w / visibleCandles.length)).floor().clamp(0, visibleCandles.length - 1);
+          setState(() {
+            _touchedDateTime = visibleCandles[idx].date;
+          });
+        }
       },
-      onScaleEnd: (d) { _lastScaleStart = null; _lastFocalPoint = null; if (_scrollVelocity.abs() > 0.001) _scrollAnimationController.repeat(); },
-      onDoubleTap: () { _scrollAnimationController.stop(); setState(() { if (_chartZoom < 2.0) _chartZoom = 3.0; else { _chartZoom = 1.0; _chartPanOffsetX = 1.0; _chartPanOffsetY = 0.0; } }); },
-      onLongPressStart: (d) { _scrollAnimationController.stop(); _updateCrosshair(d.localPosition, visibleCandles, chartHeight); },
-      onLongPressMoveUpdate: (d) => _updateCrosshair(d.localPosition, visibleCandles, chartHeight),
-      onLongPressEnd: (d) => setState(() { _showCrosshair = false; _crosshairPosition = null; _crosshairIndex = null; }),
-      child: SizedBox(height: chartHeight, child: ClipRect(child: RepaintBoundary(child: Container(decoration: const BoxDecoration(color: AppColors.chartBackground), child: Stack(children: [
-        child, if (_showCrosshair && _crosshairPosition != null) Positioned.fill(child: CustomPaint(painter: CrosshairPainter(position: _crosshairPosition!, color: AppColors.axisLabel.withOpacity(0.7)))),
-      ]))))),
+      onPointerMove: (event) {
+        final x = event.localPosition.dx;
+        final w = MediaQuery.of(context).size.width - 120;
+        if (visibleCandles.isNotEmpty && w > 0) {
+          final int idx = (x / (w / visibleCandles.length)).floor().clamp(0, visibleCandles.length - 1);
+          setState(() {
+            _touchedDateTime = visibleCandles[idx].date;
+          });
+        }
+      },
+      child: GestureDetector(
+        onVerticalDragStart: (d) {},
+        onScaleStart: (d) { _scrollAnimationController.stop(); _lastScaleStart = _chartZoom; _lastFocalPoint = d.focalPoint; },
+        onScaleUpdate: (d) {
+          setState(() {
+            if (_lastScaleStart != null && d.scale != 1.0) _chartZoom = (_lastScaleStart! * d.scale).clamp(_minZoom, _maxZoom);
+            if (d.scale == 1.0 && _lastFocalPoint != null) {
+              final double dx = d.focalPoint.dx - _lastFocalPoint!.dx;
+              final double dy = d.focalPoint.dy - _lastFocalPoint!.dy;
+              final double w = MediaQuery.of(context).size.width - 120;
+              if (w > 0) { _chartPanOffsetX = (_chartPanOffsetX - (dx / w) / _chartZoom).clamp(0.0, 1.0); _scrollVelocity = -(dx / w) / _chartZoom; }
+              // 縦方向のスクロール感度と範囲を向上
+              _chartPanOffsetY = (_chartPanOffsetY + (dy / 150 / _chartZoom)).clamp(-10.0, 10.0);
+            }
+            _lastFocalPoint = d.focalPoint;
+          });
+        },
+        onScaleEnd: (d) { _lastScaleStart = null; _lastFocalPoint = null; if (_scrollVelocity.abs() > 0.001) _scrollAnimationController.repeat(); },
+        onDoubleTap: () { _scrollAnimationController.stop(); setState(() { if (_chartZoom < 2.0) _chartZoom = 3.0; else { _chartZoom = 1.0; _chartPanOffsetX = 1.0; _chartPanOffsetY = 0.0; } }); },
+        onLongPressStart: (d) { _scrollAnimationController.stop(); _updateCrosshair(d.localPosition, visibleCandles, chartHeight); },
+        onLongPressMoveUpdate: (d) => _updateCrosshair(d.localPosition, visibleCandles, chartHeight),
+        onLongPressEnd: (d) => setState(() { _showCrosshair = false; _crosshairPosition = null; _crosshairIndex = null; }),
+        child: SizedBox(height: chartHeight, child: ClipRect(child: RepaintBoundary(child: Container(decoration: const BoxDecoration(color: AppColors.chartBackground), child: Stack(children: [
+          child, if (_showCrosshair && _crosshairPosition != null) Positioned.fill(child: CustomPaint(painter: CrosshairPainter(position: _crosshairPosition!, color: AppColors.axisLabel.withOpacity(0.7)))),
+        ]))))),
+      ),
     );
   }
 
@@ -1003,11 +1060,12 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
   Widget _buildOscillatorPanels(List<Candle> candles, int visibleStartIdx, int visibleEndIdx, int xInt, int panelStartIndex) {
     final prices = candles.map((c) => c.close).toList();
     final panels = <Widget>[];
+    final visibleCandlesSubset = _safeSublist(candles, visibleStartIdx, visibleEndIdx);
 
     if (_showRSI) {
       final rsi = OscillatorIndicators.calculateRSI(prices, period: _rsiPeriod);
       final v = _safeSublist(rsi.values, visibleStartIdx, visibleEndIdx);
-      if (v.isNotEmpty) panels.add(_buildSingleOscillatorPanel(title: 'RSI($_rsiPeriod)', values: v, minY: 0, maxY: 100, lineColor: AppColors.rsiLine, oscillatorType: 'rsi', startIndex: panelStartIndex, xLabelInterval: xInt));
+      if (v.isNotEmpty) panels.add(_buildSingleOscillatorPanel(title: 'RSI($_rsiPeriod)', values: v, minY: 0, maxY: 100, lineColor: AppColors.rsiLine, oscillatorType: 'rsi', startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
     }
     if (_showMACD) {
       final m = OscillatorIndicators.calculateMACD(prices, fastPeriod: _macdFast, slowPeriod: _macdSlow, signalPeriod: _macdSignal);
@@ -1015,43 +1073,50 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       final vs = _safeSublist(m.signalLine, visibleStartIdx, visibleEndIdx);
       final vh = _safeSublist(m.histogram, visibleStartIdx, visibleEndIdx);
       if (vm.isNotEmpty) {
-        double mn = 0, mx = 0; for (final x in vm) if (x != null) { mn = min(mn, x); mx = max(mx, x); }
-        for (final x in vs) if (x != null) { mn = min(mn, x); mx = max(mx, x); }
+        double mn = 0, mx = 0; for (final x in vm) if (x != null) { mn = math.min(mn, x); mx = math.max(mx, x); }
+        for (final x in vs) if (x != null) { mn = math.min(mn, x); mx = math.max(mx, x); }
         final p = (mx - mn) * 0.1;
-        panels.add(_buildSingleOscillatorPanel(title: 'MACD', values: vm, minY: mn - p, maxY: mx + p, lineColor: AppColors.macdLine, oscillatorType: 'macd', signalLine: vs, histogram: vh, startIndex: panelStartIndex, xLabelInterval: xInt));
+        panels.add(_buildSingleOscillatorPanel(title: 'MACD', values: vm, minY: mn - p, maxY: mx + p, lineColor: AppColors.macdLine, oscillatorType: 'macd', signalLine: vs, histogram: vh, startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
       }
     }
     if (_showStochastic) {
       final s = OscillatorIndicators.calculateStochastic(candles, kPeriod: _stochKPeriod, dPeriod: _stochDPeriod, smooth: _stochSmooth);
       final vk = _safeSublist(s.percentK, visibleStartIdx, visibleEndIdx);
       final vd = _safeSublist(s.percentD, visibleStartIdx, visibleEndIdx);
-      if (vk.isNotEmpty) panels.add(_buildSingleOscillatorPanel(title: 'Stoch', values: vk, minY: 0, maxY: 100, lineColor: AppColors.stochK, oscillatorType: 'stochastic', signalLine: vd, startIndex: panelStartIndex, xLabelInterval: xInt));
+      if (vk.isNotEmpty) panels.add(_buildSingleOscillatorPanel(title: 'Stoch', values: vk, minY: 0, maxY: 100, lineColor: AppColors.stochK, oscillatorType: 'stochastic', signalLine: vd, startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
     }
     if (_showCCI) {
       final c = OscillatorIndicators.calculateCCI(candles, period: _cciPeriod);
       final vc = _safeSublist(c.values, visibleStartIdx, visibleEndIdx);
       if (vc.isNotEmpty) {
-        double mn = -100, mx = 100; for (final x in vc) if (x != null) { mn = min(mn, x); mx = max(mx, x); }
+        double mn = -100, mx = 100; for (final x in vc) if (x != null) { mn = math.min(mn, x); mx = math.max(mx, x); }
         final p = (mx - mn) * 0.1;
-        panels.add(_buildSingleOscillatorPanel(title: 'CCI', values: vc, minY: mn - p, maxY: mx + p, lineColor: AppColors.cciLine, oscillatorType: 'cci', startIndex: panelStartIndex, xLabelInterval: xInt));
+        panels.add(_buildSingleOscillatorPanel(title: 'CCI', values: vc, minY: mn - p, maxY: mx + p, lineColor: AppColors.cciLine, oscillatorType: 'cci', startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
       }
     }
     return Column(children: panels);
   }
 
-  Widget _buildSingleOscillatorPanel({required String title, required List<double?> values, required double minY, required double maxY, required Color lineColor, required String oscillatorType, List<double?> signalLine = const [], List<double?> histogram = const [], required int startIndex, required int xLabelInterval}) {
+  Widget _buildSingleOscillatorPanel({required String title, required List<double?> values, required double minY, required double maxY, required Color lineColor, required String oscillatorType, List<double?> signalLine = const [], List<double?> histogram = const [], required int startIndex, required int xLabelInterval, required List<Candle> visibleCandles}) {
     const double h = 140.0;
+    
+    // オシレーターごとの固定目盛り設定
+    List<double>? fixedLevels;
+    if (oscillatorType == 'rsi') fixedLevels = [70, 50, 30];
+    else if (oscillatorType == 'macd') fixedLevels = [0];
+    else if (oscillatorType == 'stochastic') fixedLevels = [80, 50, 20];
+    else if (oscillatorType == 'cci') fixedLevels = [100, 0, -100];
+
     return SizedBox(
       height: h,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(
-            child: DecoratedBox(
+            child: Container(
               decoration: const BoxDecoration(
                 border: Border(
-                  bottom: BorderSide(color: AppColors.chartGrid, width: 0.5),
-                  right: BorderSide(color: AppColors.chartGrid, width: 1.2),
+                  bottom: BorderSide(color: AppColors.chartGrid, width: 1.2),
                 ),
               ),
               child: Stack(
@@ -1061,6 +1126,9 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
                     child: CustomPaint(
                       painter: OscillatorPainter(
                         values: values, minY: minY, maxY: maxY, lineColor: lineColor, oscillatorType: oscillatorType, signalLine: signalLine, histogram: histogram, startIndex: startIndex, xLabelInterval: xLabelInterval,
+                        touchedLevel: _touchedIndicatorLevels[oscillatorType],
+                        touchedDateTime: _touchedDateTime,
+                        candles: visibleCandles,
                       ),
                     ),
                   ),
@@ -1072,10 +1140,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
               ),
             ),
           ),
-          SizedBox(
-            width: 55,
-            child: CustomPaint(painter: OscillatorYAxisLabelPainter(minY: minY, maxY: maxY, oscillatorType: oscillatorType)),
-          ),
+          _buildYAxisLabels(minY, maxY, fixedLevels: fixedLevels, oscillatorType: oscillatorType),
         ],
       ),
     );
@@ -1083,24 +1148,112 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
 
   double _calculatePriceStep(double r) {
     if (r <= 0) return 1.0;
-    double s = r / 12; double e = (log(s) / ln10).floorToDouble(); double m = pow(10, e).toDouble(); double rs = s / m;
+    double s = r / 12; double e = (math.log(s) / math.ln10).floorToDouble(); double m = math.pow(10, e).toDouble(); double rs = s / m;
     if (rs < 1.5) return 1.0 * m; if (rs < 3.0) return 2.0 * m; if (rs < 7.0) return 5.0 * m; return 10.0 * m;
   }
 
   int _calculateXLabelInterval(int d) {
-    if (d <= 15) return 2; if (d <= 40) return 5; if (d <= 80) return 10; if (d <= 150) return 20; if (d <= 300) return 40;
-    return (d / 6).ceil();
+    int interval;
+    if (d <= 15) interval = 2;
+    else if (d <= 40) interval = 5;
+    else if (d <= 80) interval = 10;
+    else if (d <= 150) interval = 20;
+    else if (d <= 300) interval = 40;
+    else interval = (d / 6).ceil();
+    
+    // 描画間隔を0.95倍にする（より細かく表示する）
+    return (interval * 0.95).round().clamp(1, d);
   }
 
   int _getBaseVisibleDataPoints() => 100;
 
-  Widget _buildYAxisLabels(double minY, double maxY) {
-    return SizedBox(width: 55, child: CustomPaint(painter: YAxisLabelPainter(minY: minY, maxY: maxY, latestPrice: _candles.isNotEmpty ? _candles.last.close : null)));
+  Widget _buildYAxisLabels(double minY, double maxY, {List<double>? fixedLevels, String? oscillatorType}) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final currentTouchedValue = oscillatorType != null 
+            ? _touchedIndicatorLevels[oscillatorType] 
+            : _touchedPrice;
+
+        return Listener(
+          onPointerDown: (event) {
+            final y = event.localPosition.dy;
+            final range = maxY - minY;
+            final value = maxY - (y / constraints.maxHeight) * range;
+            setState(() {
+              if (oscillatorType != null) {
+                _touchedIndicatorLevels[oscillatorType] = value;
+              } else {
+                _touchedPrice = value;
+              }
+            });
+          },
+          onPointerMove: (event) {
+            final y = event.localPosition.dy;
+            final range = maxY - minY;
+            final value = maxY - (y / constraints.maxHeight) * range;
+            setState(() {
+              if (oscillatorType != null) {
+                _touchedIndicatorLevels[oscillatorType] = value;
+              } else {
+                _touchedPrice = value;
+              }
+            });
+          },
+          child: Container(
+            width: 55,
+            decoration: const BoxDecoration(
+              border: Border(
+                left: BorderSide(color: AppColors.chartGrid, width: 1.2),
+              ),
+            ),
+            child: CustomPaint(
+              painter: YAxisLabelPainter(
+                minY: minY, 
+                maxY: maxY, 
+                latestPrice: oscillatorType == null && _candles.isNotEmpty ? _candles.last.close : null,
+                touchedPrice: currentTouchedValue,
+                fixedLevels: fixedLevels,
+              ),
+            ),
+          ),
+        );
+      }
+    );
   }
 
   Widget _buildXAxisLabels(List<Candle> vc, int interval, int startIndex) {
     if (vc.isEmpty) return const SizedBox();
-    return SizedBox(height: 25, width: double.infinity, child: CustomPaint(painter: XAxisLabelPainter(visibleCandles: vc, interval: interval, startIndex: startIndex, intervalType: _interval)));
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return Listener(
+          onPointerDown: (event) {
+            final x = event.localPosition.dx;
+            final double cw = constraints.maxWidth / vc.length;
+            final int idx = (x / cw).floor().clamp(0, vc.length - 1);
+            setState(() => _touchedDateTime = vc[idx].date);
+          },
+          onPointerMove: (event) {
+            final x = event.localPosition.dx;
+            final double cw = constraints.maxWidth / vc.length;
+            final int idx = (x / cw).floor().clamp(0, vc.length - 1);
+            setState(() => _touchedDateTime = vc[idx].date);
+          },
+          child: SizedBox(
+            height: 25, 
+            width: double.infinity, 
+            child: CustomPaint(
+              painter: XAxisLabelPainter(
+                visibleCandles: vc, 
+                interval: interval, 
+                startIndex: startIndex, 
+                intervalType: _interval,
+                touchedDateTime: _touchedDateTime,
+              )
+            )
+          ),
+        );
+      }
+    );
   }
 
   String _formatPriceWithCurrency(double p) {
@@ -1117,12 +1270,25 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
 
   Widget _buildFooter() {
     return Container(
-      height: 130, padding: const EdgeInsets.only(bottom: 20),
-      decoration: const BoxDecoration(color: Color(0xFF05141F), border: Border(top: BorderSide(color: Color(0xFF1E2C38), width: 0.5))),
+      height: 100, 
+      padding: const EdgeInsets.only(bottom: 10),
+      decoration: const BoxDecoration(
+        color: AppColors.surface, 
+        border: Border(top: BorderSide(color: AppColors.divider, width: 1.0))
+      ),
       child: Row(
         children: [
           _buildFooterItem(icon: Icons.grid_view, label: 'ホーム', badge: '18', onTap: () => Navigator.of(context).popUntil((r) => r.isFirst)),
-          _buildFooterItem(icon: Icons.stacked_line_chart, label: 'チャート', isSelected: true),
+          _buildFooterItem(
+            icon: Icons.stacked_line_chart, 
+            label: 'チャート', 
+            isSelected: true,
+            onTap: () {
+              setState(() {
+                _isMaximizedChart = !_isMaximizedChart;
+              });
+            },
+          ),
           _buildFooterItem(icon: Icons.category_outlined, label: 'カテゴリー', onTap: _showCategorySettings),
         ],
       ),
@@ -1207,7 +1373,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
   }
 
   Widget _buildFooterItem({required IconData icon, required String label, bool isSelected = false, String? badge, VoidCallback? onTap}) {
-    final color = isSelected ? const Color(0xFFFF9800) : const Color(0xFF8E9EAD);
+    final color = isSelected ? AppColors.primary : AppColors.textSecondary;
     return Expanded(
       child: InkWell(
         onTap: onTap,
@@ -1217,21 +1383,21 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
             Stack(
               clipBehavior: Clip.none,
               children: [
-                Icon(icon, color: color, size: 36),
+                Icon(icon, color: color, size: 28),
                 if (badge != null)
                   Positioned(
-                    right: -10, top: -6,
+                    right: -8, top: -4,
                     child: Container(
                       padding: const EdgeInsets.all(2),
-                      decoration: BoxDecoration(color: const Color(0xFFE53935), borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0xFF05141F), width: 2.0)),
-                      constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
-                      child: Text(badge, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
+                      decoration: BoxDecoration(color: AppColors.error, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.surface, width: 1.5)),
+                      constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                      child: Text(badge, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
                     ),
                   ),
               ],
             ),
-            const SizedBox(height: 6),
-            Text(label, style: TextStyle(color: color, fontSize: 13, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
+            const SizedBox(height: 4),
+            Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal)),
           ],
         ),
       ),
@@ -1239,204 +1405,11 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
   }
 }
 
-class OscillatorPainter extends CustomPainter {
-  final List<double?> values; final double minY, maxY; final Color lineColor; final String oscillatorType; final List<double?>? signalLine; final List<double?>? histogram; final int startIndex; final int xLabelInterval;
-  OscillatorPainter({required this.values, required this.minY, required this.maxY, required this.lineColor, required this.oscillatorType, this.signalLine, this.histogram, required this.startIndex, required this.xLabelInterval});
-  @override
-  void paint(Canvas canvas, ui.Size size) {
-    if (values.isEmpty) return; final double cw = size.width / values.length; final double range = maxY - minY; if (range <= 0) return;
-    final gridPaint = Paint()..color = AppColors.chartGrid.withOpacity(0.8)..strokeWidth = 0.5;
-    
-    // X軸目盛り線（垂直点線）
-    for (int i = 0; i < values.length; i++) {
-      if ((startIndex + i) % xLabelInterval == 0) {
-        final x = i * cw + cw / 2;
-        double curY = 0; while (curY < size.height) { canvas.drawLine(Offset(x, curY), Offset(x, min(curY + 4, size.height)), gridPaint); curY += 8; }
-      }
-    }
-
-    final levels = <double>[];
-    if (oscillatorType == 'rsi') levels.addAll([70, 50, 30]);
-    else if (oscillatorType == 'macd') levels.add(0);
-    else if (oscillatorType == 'stochastic') levels.addAll([80, 50, 20]);
-    else if (oscillatorType == 'cci') levels.addAll([100, 0, -100]);
-    for (final l in levels) {
-      final y = size.height - ((l - minY) / range * size.height);
-      if (y >= 0 && y <= size.height) {
-        double curX = 0; while (curX < size.width) { canvas.drawLine(Offset(curX, y), Offset(min(curX + 4, size.width), y), gridPaint); curX += 8; }
-      }
-    }
-    if (histogram != null) {
-      final histPaint = Paint()..style = PaintingStyle.fill;
-      for (int i = 0; i < histogram!.length; i++) {
-        final val = histogram![i]; if (val == null) continue;
-        final x = i * cw + cw / 2; final y0 = size.height - ((0 - minY) / range * size.height); final y = size.height - ((val - minY) / range * size.height);
-        histPaint.color = val >= 0 ? AppColors.rise.withOpacity(0.6) : AppColors.fall.withOpacity(0.6);
-        canvas.drawRect(Rect.fromLTRB(x - cw * 0.4, min(y, y0), x + cw * 0.4, max(y, y0)), histPaint);
-      }
-    }
-    _drawLine(canvas, size, values, lineColor, 1.5, range, cw);
-    if (signalLine != null) _drawLine(canvas, size, signalLine!, AppColors.macdSignal, 1.2, range, cw);
-  }
-  void _drawLine(Canvas canvas, ui.Size size, List<double?> data, Color color, double width, double range, double cw) {
-    final paint = Paint()..color = color..strokeWidth = width..style = PaintingStyle.stroke..strokeCap = StrokeCap.round..strokeJoin = StrokeJoin.round;
-    final path = Path(); bool started = false;
-    for (int i = 0; i < data.length; i++) {
-      final val = data[i]; if (val == null) { started = false; continue; }
-      final x = i * cw + cw / 2; final y = size.height - ((val - minY) / range * size.height);
-      if (!started) { path.moveTo(x, y); started = true; } else path.lineTo(x, y);
-    }
-    canvas.drawPath(path, paint);
-  }
-  @override bool shouldRepaint(covariant OscillatorPainter old) => true;
-}
-
-class YAxisLabelPainter extends CustomPainter {
-  final double minY, maxY; final double? latestPrice;
-  YAxisLabelPainter({required this.minY, required this.maxY, this.latestPrice});
-  @override
-  void paint(Canvas canvas, ui.Size size) {
-    final range = maxY - minY; if (range <= 0) return;
-    double s = range / 12; double e = (log(s) / ln10).floorToDouble(); double m = pow(10, e).toDouble(); double rs = s / m;
-    double ps = (rs < 1.5) ? 1.0 * m : (rs < 3.0) ? 2.0 * m : (rs < 7.0) ? 5.0 * m : 10.0 * m;
-    double fl = (minY / ps).ceil() * ps;
-    final ts = TextStyle(fontSize: 11, color: AppColors.textSecondary, fontWeight: FontWeight.bold);
-    for (double v = fl; v <= maxY; v += ps) {
-      final double y = size.height - ((v - minY) / range * size.height);
-      if (y >= 0 && y <= size.height) {
-        final tp = TextPainter(text: TextSpan(text: v.toStringAsFixed(v < 1 ? 4 : (v < 100 ? 2 : 0)), style: ts), textDirection: ui.TextDirection.ltr)..layout();
-        tp.paint(canvas, Offset(8, y - tp.height / 2));
-      }
-    }
-    if (latestPrice != null && latestPrice! >= minY && latestPrice! <= maxY) {
-      final y = size.height - ((latestPrice! - minY) / range * size.height);
-      final tp = TextPainter(text: TextSpan(text: latestPrice!.toStringAsFixed(latestPrice! < 1 ? 4 : (latestPrice! < 100 ? 2 : 0)), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)), textDirection: ui.TextDirection.ltr)..layout();
-      canvas.drawRRect(RRect.fromRectAndRadius(Rect.fromLTWH(4, y - tp.height / 2 - 2, size.width - 8, tp.height + 4), const Radius.circular(4)), Paint()..color = AppColors.primary);
-      tp.paint(canvas, Offset(8, y - tp.height / 2));
-    }
-  }
-  @override bool shouldRepaint(covariant YAxisLabelPainter old) => old.minY != minY || old.maxY != maxY || old.latestPrice != latestPrice;
-}
-
-class XAxisLabelPainter extends CustomPainter {
-  final List<Candle> visibleCandles; final int interval; final int startIndex; final String intervalType;
-  XAxisLabelPainter({required this.visibleCandles, required this.interval, required this.startIndex, required this.intervalType});
-  @override
-  void paint(Canvas canvas, ui.Size size) {
-    if (visibleCandles.isEmpty) return; final double cw = size.width / visibleCandles.length;
-    final ts = TextStyle(fontSize: 10, color: AppColors.textSecondary, fontWeight: FontWeight.bold);
-    for (int i = 0; i < visibleCandles.length; i++) {
-      if ((startIndex + i) % interval == 0) {
-        final x = i * cw + cw / 2; final c = visibleCandles[i];
-        String label = (intervalType.contains('m') || intervalType.contains('h')) ? DateFormat('HH:mm').format(c.date) : DateFormat('MM/dd').format(c.date);
-        final tp = TextPainter(text: TextSpan(text: label, style: ts), textDirection: ui.TextDirection.ltr)..layout();
-        // 右端の境界線に重ならないようにクリッピングまたは調整
-        if (x + tp.width / 2 < size.width) {
-          tp.paint(canvas, Offset(x - tp.width / 2, 4));
-        } else if (x - tp.width / 2 < size.width) {
-           // 右端ギリギリの場合は左に寄せる
-          tp.paint(canvas, Offset(size.width - tp.width - 2, 4));
-        }
-      }
-    }
-  }
-  @override bool shouldRepaint(covariant XAxisLabelPainter old) => true;
-}
-
 class _IndicatorConfig {
   final String key, name, fullName, description; final Color color; final IconData icon;
   _IndicatorConfig({required this.key, required this.name, required this.fullName, required this.description, required this.color, required this.icon});
 }
 
-class ChartGridPainter extends CustomPainter {
-  final int dataLength; final int xLabelInterval; final double minY; final double maxY; final int startIndex;
-  ChartGridPainter({required this.dataLength, required this.xLabelInterval, required this.minY, required this.maxY, required this.startIndex});
-  double _calculatePriceStep(double r) {
-    if (r <= 0) return 1.0;
-    double s = r / 12; double e = (log(s) / ln10).floorToDouble(); double m = pow(10, e).toDouble(); double rs = s / m;
-    if (rs < 1.5) return 1.0 * m; if (rs < 3.0) return 2.0 * m; if (rs < 7.0) return 5.0 * m; return 10.0 * m;
-  }
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (dataLength == 0) return;
-    final dw = size.width / dataLength; final pr = maxY - minY; final p = Paint()..color = AppColors.chartGrid.withOpacity(0.8)..strokeWidth = 0.7;
-    double ps = _calculatePriceStep(pr); double fl = (minY / ps).ceil() * ps;
-    for (double v = fl; v <= maxY; v += ps) {
-      final double y = size.height - ((v - minY) / pr * size.height);
-      double curX = 0; while (curX < size.width) { canvas.drawLine(Offset(curX, y), Offset(min(curX + 4, size.width), y), p); curX += 8; }
-    }
-    for (int i = 0; i < dataLength; i++) {
-      if ((startIndex + i) % xLabelInterval == 0) {
-        final x = i * dw + dw / 2;
-        double curY = 0; while (curY < size.height) { canvas.drawLine(Offset(x, curY), Offset(x, min(curY + 4, size.height)), p); curY += 8; }
-      }
-    }
-  }
-  @override bool shouldRepaint(covariant ChartGridPainter old) => old.dataLength != dataLength || old.xLabelInterval != xLabelInterval || old.minY != minY || old.maxY != maxY || old.startIndex != startIndex;
-}
-
-class CrosshairPainter extends CustomPainter {
-  final Offset position; final Color color;
-  CrosshairPainter({required this.position, required this.color});
-  @override
-  void paint(Canvas canvas, Size size) {
-    final p = Paint()..color = color..strokeWidth = 1..style = PaintingStyle.stroke;
-    final dp = Paint()..color = color.withAlpha(150)..strokeWidth = 1;
-    double y = 0; while (y < size.height) { canvas.drawLine(Offset(position.dx, y), Offset(position.dx, y + 4), dp); y += 8; }
-    double x = 0; while (x < size.width) { canvas.drawLine(Offset(x, position.dy), Offset(x + 4, position.dy), dp); x += 8; }
-    canvas.drawCircle(position, 6, p); canvas.drawCircle(position, 3, Paint()..color = color);
-  }
-  @override bool shouldRepaint(covariant CrosshairPainter old) => position != old.position;
-}
-
-class CandlestickPainter extends CustomPainter {
-  final List<Candle> candles; final double minY; final double maxY; final BollingerBandsResult? bb; final List<List<double?>>? emaLines; final int startIndex; final int xLabelInterval; final int indicatorStartIndex;
-  CandlestickPainter({required this.candles, required this.minY, required this.maxY, this.bb, this.emaLines, this.startIndex = 0, this.xLabelInterval = 5, this.indicatorStartIndex = 0});
-  double _calculatePriceStep(double r) {
-    if (r <= 0) return 1.0;
-    double s = r / 12; double e = (log(s) / ln10).floorToDouble(); double m = pow(10, e).toDouble(); double rs = s / m;
-    if (rs < 1.5) return 1.0 * m; if (rs < 3.0) return 2.0 * m; if (rs < 7.0) return 5.0 * m; return 10.0 * m;
-  }
-  @override
-  void paint(Canvas canvas, Size size) {
-    if (candles.isEmpty) return;
-    final cw = size.width / candles.length; final pr = maxY - minY; final gp = Paint()..color = AppColors.chartGrid.withOpacity(0.8)..strokeWidth = 0.7;
-    double ps = _calculatePriceStep(pr); double fl = (minY / ps).ceil() * ps;
-    for (double v = fl; v <= maxY; v += ps) {
-      final double y = size.height - ((v - minY) / pr * size.height);
-      double curX = 0; while (curX < size.width) { canvas.drawLine(Offset(curX, y), Offset(min(curX + 4, size.width), y), gp); curX += 8; }
-    }
-    for (int i = 0; i < candles.length; i++) {
-      if ((startIndex + i) % xLabelInterval == 0) {
-        final x = i * cw + cw / 2;
-        double curY = 0; while (curY < size.height) { canvas.drawLine(Offset(x, curY), Offset(x, min(curY + 4, size.height)), gp); curY += 8; }
-      }
-    }
-    for (int i = indicatorStartIndex; i < candles.length; i++) {
-      final c = candles[i]; final x = i * cw + cw / 2;
-      final hy = size.height - ((c.high - minY) / pr * size.height); final ly = size.height - ((c.low - minY) / pr * size.height);
-      final oy = size.height - ((c.open - minY) / pr * size.height); final cy = size.height - ((c.close - minY) / pr * size.height);
-      final pos = c.close >= c.open; final color = pos ? AppColors.rise : AppColors.fall;
-      canvas.drawLine(Offset(x, hy), Offset(x, ly), Paint()..color = color.withOpacity(0.8)..strokeWidth = 1);
-      final bt = pos ? cy : oy; final bb = pos ? oy : cy;
-      canvas.drawRect(Rect.fromCenter(center: Offset(x, (bt + bb) / 2), width: (cw * 0.8).clamp(1.0, 20.0), height: (bb - bt).abs().clamp(1.0, size.height)), Paint()..color = color..style = PaintingStyle.fill);
-    }
-    if (bb != null) {
-      final bc = AppColors.bbMiddle.withOpacity(0.5);
-      _drawIL(canvas, size, bb!.middle, bc, 1.2, pr); _drawIL(canvas, size, bb!.upper1, bc.withOpacity(0.3), 0.8, pr); _drawIL(canvas, size, bb!.lower1, bc.withOpacity(0.3), 0.8, pr); _drawIL(canvas, size, bb!.upper2, bc.withOpacity(0.2), 0.8, pr); _drawIL(canvas, size, bb!.lower2, bc.withOpacity(0.2), 0.8, pr);
-    }
-    if (emaLines != null) {
-      final colors = [AppColors.emaShort, AppColors.emaMedium, AppColors.emaLong];
-      for (int i = 0; i < emaLines!.length && i < colors.length; i++) _drawIL(canvas, size, emaLines![i], colors[i].withOpacity(0.8), 1.5, pr);
-    }
-  }
-  void _drawIL(Canvas cv, Size s, List<double?> d, Color c, double w, double pr) {
-    final p = Paint()..color = c..strokeWidth = w..style = PaintingStyle.stroke; final path = Path(); bool started = false; final cw = s.width / candles.length;
-    for (int i = 0; i < d.length; i++) if (d[i] != null) { final x = i * cw + cw / 2; final y = s.height - ((d[i]! - minY) / pr * s.height); if (!started) { path.moveTo(x, y); started = true; } else path.lineTo(x, y); }
-    cv.drawPath(path, p);
-  }
-  @override bool shouldRepaint(covariant CandlestickPainter old) => old.candles != candles || old.minY != minY || old.maxY != maxY || old.bb != bb || old.emaLines != emaLines;
-}
 
 class OscillatorYAxisLabelPainter extends CustomPainter {
   final double minY, maxY; final String oscillatorType;
