@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import '../models/user.dart';
 import '../services/memo_service.dart';
 import '../theme/app_colors.dart';
+import '../theme/app_text_styles.dart';
 
 class MemoScreen extends StatefulWidget {
   final String symbol;
@@ -49,94 +50,104 @@ class _MemoScreenState extends State<MemoScreen> {
     }
   }
 
-  Future<void> _showAddMemoDialog() async {
-    final controller = TextEditingController();
+  Future<void> _showMemoInput({Memo? existingMemo}) async {
+    final controller = TextEditingController(text: existingMemo?.content);
+    final isEditing = existingMemo != null;
 
     final result = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('メモを追加'),
-        content: TextField(
-          controller: controller,
-          maxLines: 5,
-          decoration: const InputDecoration(
-            hintText: 'メモを入力...',
-            border: OutlineInputBorder(),
+      barrierDismissible: true,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20),
+        child: Container(
+          width: double.infinity,
+          constraints: const BoxConstraints(maxWidth: 500),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppColors.border, width: 1),
           ),
-          autofocus: true,
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    isEditing ? 'メモを編集' : '新規メモ',
+                    style: AppTextStyles.headline3,
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close, color: AppColors.textSecondary),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: controller,
+                maxLines: 8,
+                style: AppTextStyles.body1,
+                autofocus: true,
+                decoration: InputDecoration(
+                  hintText: 'ここにメモを入力...',
+                  hintStyle: AppTextStyles.bodySecondary,
+                  filled: true,
+                  fillColor: AppColors.background,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  contentPadding: const EdgeInsets.all(16),
+                ),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                height: 54,
+                child: FilledButton(
+                  onPressed: () => Navigator.pop(context, controller.text),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: Text(
+                    isEditing ? '更新する' : '保存する',
+                    style: AppTextStyles.button.copyWith(color: Colors.white),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('保存'),
-          ),
-        ],
       ),
     );
 
     if (result != null && result.isNotEmpty) {
-      final memo = await _memoService.createMemo(widget.symbol, result);
-      if (mounted) {
-        if (memo != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('メモを保存しました'),
-              backgroundColor: AppColors.success,
-              behavior: SnackBarBehavior.floating,
-              margin: EdgeInsets.all(20),
-            ),
-          );
-          _loadMemos();
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('メモの保存に失敗しました'),
-              backgroundColor: AppColors.error,
-              behavior: SnackBarBehavior.floating,
-              margin: EdgeInsets.all(20),
-            ),
-          );
+      if (isEditing) {
+        if (result != existingMemo.content) {
+          final success = await _memoService.updateMemo(existingMemo.id, result);
+          if (success) _loadMemos();
         }
-      }
-    }
-  }
-
-  Future<void> _showEditMemoDialog(Memo memo) async {
-    final controller = TextEditingController(text: memo.content);
-
-    final result = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('メモを編集'),
-        content: TextField(
-          controller: controller,
-          maxLines: 5,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-          ),
-          autofocus: true,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('キャンセル'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text),
-            child: const Text('保存'),
-          ),
-        ],
-      ),
-    );
-
-    if (result != null && result.isNotEmpty && result != memo.content) {
-      final success = await _memoService.updateMemo(memo.id, result);
-      if (success) {
-        _loadMemos();
+      } else {
+        final memo = await _memoService.createMemo(widget.symbol, result);
+        if (mounted) {
+          if (memo != null) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('メモを保存しました'),
+                backgroundColor: AppColors.success,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+            _loadMemos();
+          }
+        }
       }
     }
   }
@@ -145,17 +156,17 @@ class _MemoScreenState extends State<MemoScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('メモを削除'),
-        content: const Text('このメモを削除しますか？'),
+        backgroundColor: AppColors.surface,
+        title: Text('メモを削除', style: AppTextStyles.headline3),
+        content: Text('このメモを削除しますか？\nこの操作は取り消せません。', style: AppTextStyles.body2),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('キャンセル'),
+            child: const Text('キャンセル', style: TextStyle(color: AppColors.textSecondary)),
           ),
-          FilledButton(
+          TextButton(
             onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.error),
-            child: const Text('削除'),
+            child: const Text('削除', style: TextStyle(color: AppColors.error, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -171,39 +182,48 @@ class _MemoScreenState extends State<MemoScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final displayName = widget.symbol.replaceAll('-USD', '');
+    final displayName = widget.symbol.replaceAll('-USD', '').replaceAll('=X', '');
 
     return Scaffold(
+      backgroundColor: AppColors.scaffoldBackground,
       appBar: AppBar(
-        title: Text('$displayName メモ'),
+        backgroundColor: AppColors.scaffoldBackground,
+        elevation: 0,
+        title: Text('$displayName メモ', style: AppTextStyles.headline3),
+        centerTitle: true,
       ),
       body: _buildBody(),
       floatingActionButton: FloatingActionButton(
-        onPressed: _showAddMemoDialog,
-        child: const Icon(Icons.add),
+        onPressed: () => _showMemoInput(),
+        backgroundColor: AppColors.primary,
+        child: const Icon(Icons.add, color: Colors.white, size: 30),
       ),
     );
   }
 
   Widget _buildBody() {
     if (_isLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator(color: AppColors.primary));
     }
 
     if (_error != null) {
       return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.error_outline, size: 48, color: AppColors.error),
-            const SizedBox(height: 16),
-            Text(_error!, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _loadMemos,
-              child: const Text('再試行'),
-            ),
-          ],
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline, size: 48, color: AppColors.error),
+              const SizedBox(height: 16),
+              Text(_error!, style: AppTextStyles.bodySecondary, textAlign: TextAlign.center),
+              const SizedBox(height: 24),
+              ElevatedButton(
+                onPressed: _loadMemos,
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary),
+                child: const Text('再試行'),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -213,74 +233,159 @@ class _MemoScreenState extends State<MemoScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.note_outlined, size: 64, color: AppColors.textSecondary.withOpacity(0.5)),
-            const SizedBox(height: 16),
-            const Text(
-              'メモがありません',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 16),
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.edit_note, size: 64, color: AppColors.primary.withOpacity(0.5)),
             ),
+            const SizedBox(height: 24),
+            Text('メモがありません', style: AppTextStyles.headline3.copyWith(color: AppColors.textSecondary)),
             const SizedBox(height: 8),
             Text(
-              '右下の + ボタンでメモを追加できます',
-              style: TextStyle(color: AppColors.textSecondary.withOpacity(0.7), fontSize: 14),
+              '分析内容や気づきを記録しましょう',
+              style: AppTextStyles.bodySecondary,
             ),
           ],
         ),
       );
     }
 
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    
+    final todayMemos = _memos.where((m) {
+      final memoDate = DateTime(m.updatedAt.year, m.updatedAt.month, m.updatedAt.day);
+      return memoDate.isAtSameMomentAs(today);
+    }).toList();
+    
+    final pastMemos = _memos.where((m) {
+      final memoDate = DateTime(m.updatedAt.year, m.updatedAt.month, m.updatedAt.day);
+      return memoDate.isBefore(today);
+    }).toList();
+
     return RefreshIndicator(
       onRefresh: _loadMemos,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: _memos.length,
-        itemBuilder: (context, index) {
-          final memo = _memos[index];
-          return _buildMemoCard(memo);
-        },
+      color: AppColors.primary,
+      child: ListView(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        children: [
+          if (todayMemos.isNotEmpty) ...[
+            _buildSectionHeader('今日のメモ', Icons.today, AppColors.primaryLight),
+            ...todayMemos.map((memo) => _buildMemoCard(memo)),
+          ],
+          if (pastMemos.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            _buildSectionHeader('過去のメモ', Icons.history, AppColors.textSecondary),
+            ...pastMemos.map((memo) => _buildMemoCard(memo)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(String title, IconData icon, Color color) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, top: 16, bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Text(
+            title,
+            style: AppTextStyles.label.copyWith(
+              color: color,
+              fontWeight: FontWeight.bold,
+              letterSpacing: 1.2,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Expanded(child: Divider(color: color.withOpacity(0.2))),
+        ],
       ),
     );
   }
 
   Widget _buildMemoCard(Memo memo) {
-    final dateFormat = DateFormat('yyyy/MM/dd HH:mm');
+    final dateStr = DateFormat('yyyy年MM月dd日 HH:mm').format(memo.updatedAt);
 
-    return Card(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        onTap: () => _showEditMemoDialog(memo),
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppColors.border, width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => _showMemoInput(existingMemo: memo),
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Text(
-                      dateFormat.format(memo.updatedAt),
-                      style: const TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 12,
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.access_time, size: 14, color: AppColors.primaryLight),
+                            const SizedBox(width: 6),
+                            Text(
+                              dateStr,
+                              style: AppTextStyles.caption.copyWith(
+                                color: AppColors.primaryLight,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.error.withOpacity(0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 20),
+                          onPressed: () => _deleteMemo(memo),
+                          color: AppColors.error,
+                          tooltip: '削除',
+                          padding: const EdgeInsets.all(8),
+                          constraints: const BoxConstraints(),
+                        ),
+                      ),
+                    ],
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.delete_outline, size: 20),
-                    onPressed: () => _deleteMemo(memo),
-                    color: AppColors.textSecondary,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
+                  const SizedBox(height: 16),
+                  Text(
+                    memo.content,
+                    style: AppTextStyles.body1.copyWith(
+                      height: 1.6,
+                      color: AppColors.textPrimary,
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              Text(
-                memo.content,
-                style: const TextStyle(fontSize: 15),
-              ),
-            ],
+            ),
           ),
         ),
       ),

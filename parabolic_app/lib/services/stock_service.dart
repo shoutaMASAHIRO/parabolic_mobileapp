@@ -125,6 +125,75 @@ class AssetService {
     });
     return response.isSuccess;
   }
+
+  // =====================
+  // お気に入り / 保有銘柄 (PostgreSQL連携)
+  // =====================
+
+  // =====================
+  // お気に入り / 保有銘柄 (既存API流用)
+  // =====================
+
+  Future<bool> toggleFavorite(String symbol, bool isFavorite, {String? displayName, String? category}) async {
+    print('DEBUG: toggleFavorite via threshold - symbol: $symbol, isFavorite: $isFavorite');
+    
+    final response = await _api.post('/api/mobile/threshold', {
+      'symbol': symbol,
+      'interval': 'favorite',
+      'threshold': isFavorite ? 1.0 : 0.0,
+    });
+
+    await _api.post('/api/mobile/indicator-settings', {
+      'symbol': symbol,
+      'displayName': displayName,
+      'category': category,
+      'isFavorite': isFavorite,
+    });
+
+    print('DEBUG: toggleFavorite response - status: ${response.statusCode}');
+    return response.isSuccess;
+  }
+
+  Future<List<Map<String, dynamic>>> getFavorites() async {
+    print('DEBUG: getFavorites via threshold lookup');
+    
+    final results = await Future.wait([
+      getCryptoTickers(),
+      getForexTickers(),
+      getStockTickers(),
+    ]);
+
+    final allTickers = [...results[0], ...results[1], ...results[2]];
+    final List<Map<String, dynamic>> favorites = [];
+
+    await Future.wait(allTickers.map((ticker) async {
+      final symbol = ticker['symbol'] as String;
+      final response = await _api.get('/api/mobile/threshold?symbol=$symbol&interval=favorite');
+      
+      if (response.isSuccess && response.json != null) {
+        final threshold = response.json!['threshold'];
+        if (threshold == 1.0) {
+          final settingsRes = await _api.get('/api/mobile/indicator-settings?symbol=$symbol');
+          final settings = settingsRes.json ?? {};
+          
+          favorites.add({
+            'symbol': symbol,
+            'displayName': settings['displayName'] ?? ticker['displayName'] ?? symbol,
+            'category': settings['category'] ?? _guessCategory(symbol),
+          });
+        }
+      }
+    }));
+
+    print('DEBUG: Found ${favorites.length} favorites');
+    return favorites;
+  }
+
+  String _guessCategory(String symbol) {
+    if (symbol.contains('-USD')) return 'crypto';
+    if (symbol.contains('=X')) return 'forex';
+    return 'stock';
+  }
 }
 
 // 後方互換性のためのエイリアス

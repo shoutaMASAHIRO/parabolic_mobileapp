@@ -10,6 +10,7 @@ class RateListItem extends StatelessWidget {
   final IconData? icon;
   final Color? iconColor;
   final bool hasNotification;
+  final bool isFavorite;
   final VoidCallback? onTap;
 
   const RateListItem({
@@ -22,6 +23,7 @@ class RateListItem extends StatelessWidget {
     this.icon,
     this.iconColor,
     this.hasNotification = false,
+    this.isFavorite = false,
     this.onTap,
   });
 
@@ -74,6 +76,7 @@ class RateListItem extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       Flexible(
                         child: Text(
@@ -87,14 +90,28 @@ class RateListItem extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (hasNotification) ...[
-                        const SizedBox(width: 4),
-                        const Icon(
-                          Icons.notifications_active,
-                          size: 14,
-                          color: AppColors.warning,
-                        ),
-                      ],
+                      // アイコンを表示領域から押し出されないように Row でラップ
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (isFavorite) ...[
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.star,
+                              size: 14,
+                              color: AppColors.bbMiddle,
+                            ),
+                          ],
+                          if (hasNotification) ...[
+                            const SizedBox(width: 4),
+                            const Icon(
+                              Icons.notifications_active,
+                              size: 14,
+                              color: AppColors.warning,
+                            ),
+                          ],
+                        ],
+                      ),
                     ],
                   ),
                   const SizedBox(height: 2),
