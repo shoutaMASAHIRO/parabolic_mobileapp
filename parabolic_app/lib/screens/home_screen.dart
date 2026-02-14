@@ -97,7 +97,7 @@ class _HomeScreenState extends State<HomeScreen> {
           FilledButton(
             onPressed: () => Navigator.pop(context, controller.text),
             style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
-            child: const Text('登録する'),
+            child: const Text('登録する', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),

@@ -58,16 +58,12 @@ class _CrossSettingsModalState extends State<CrossSettingsModal> {
 
   Future<void> _load() async {
     setState(() => _le = true);
-    // 個別の銘柄用とGLOBAL（トップページ用）の両方のメールアドレスを取得
-    final results = await Future.wait([
-      _cs.getEmails(symbol: widget.symbol),
-      _cs.getEmails(symbol: 'GLOBAL'),
-    ]);
+    // 常にGLOBAL（アプリ共通）のメールアドレスのみを取得・管理する
+    final es = await _cs.getEmails(symbol: 'GLOBAL');
     
     if (mounted) {
       setState(() {
-        // 重複を除去して統合
-        _emails = {...results[0], ...results[1]}.toList();
+        _emails = es;
         _le = false;
       });
     }
@@ -448,8 +444,8 @@ ${e.displayName} のラインを価格が【$directionText】しました。
                                   IconButton.filled(
                                     onPressed: () async {
                                       if (_ec.text.isEmpty) return;
-                                      if (await _showConfirm(title: 'アドレス登録', message: 'このメールアドレスを通知先として登録しますか？')) {
-                                        final success = await _cs.registerEmail(email: _ec.text, symbol: widget.symbol);
+                                      if (await _showConfirm(title: 'アドレス登録', message: 'このメールアドレスを全銘柄共通の通知先として登録しますか？')) {
+                                        final success = await _cs.registerEmail(email: _ec.text, symbol: 'GLOBAL');
                                         if (success) {
                                           _ec.clear();
                                           _load();
@@ -475,24 +471,34 @@ ${e.displayName} のラインを価格が【$directionText】しました。
                                       decoration: BoxDecoration(color: Colors.white.withAlpha(5), borderRadius: BorderRadius.circular(8)),
                                       child: ListTile(
                                         dense: true,
+                                        contentPadding: const EdgeInsets.only(left: 16, right: 4), // 左右の余白を調整
                                         title: Text(e, style: const TextStyle(color: Colors.white70, fontSize: 14)),
-                                        trailing: Transform.translate(
-                                          offset: const Offset(8, 0),
-                                          child: IconButton(
-                                            icon: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 18),
-                                            onPressed: () async {
-                                              if (await _showConfirm(title: 'アドレス削除', message: 'このメールアドレスを通知先から削除しますか？', confirmColor: AppColors.rise)) {
-                                                final success = await _cs.deleteEmail(email: e, symbol: widget.symbol);
-                                                if (success) _load();
+                                        trailing: IconButton(
+                                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.white, size: 18),
+                                          onPressed: () async {
+                                            if (await _showConfirm(title: 'アドレス削除', message: 'このメールアドレスを全ての通知先から削除しますか？', confirmColor: AppColors.rise)) {
+                                              // 1. まず対象のアドレスを削除
+                                              final success = await _cs.deleteEmail(email: e, symbol: 'GLOBAL');
+                                              
+                                              // 2. もしサーバーが全削除してしまった場合の保険として、
+                                              // 残すべきアドレスがあれば再登録を試みる（APIの仕様に合わせて調整）
+                                              // 現状はAPIが全削除してしまう挙動をしているため、個別に再送する
+                                              if (success) {
+                                                final remainingEmails = _emails.where((email) => email != e).toList();
+                                                for (final email in remainingEmails) {
+                                                  await _cs.registerEmail(email: email, symbol: 'GLOBAL');
+                                                }
                                               }
-                                            },
-                                            style: IconButton.styleFrom(
-                                              backgroundColor: AppColors.rise,
-                                              elevation: 2,
-                                              padding: const EdgeInsets.all(10),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius: BorderRadius.circular(8),
-                                              ),
+                                              
+                                              _load();
+                                            }
+                                          },
+                                          style: IconButton.styleFrom(
+                                            backgroundColor: AppColors.rise,
+                                            elevation: 2,
+                                            padding: const EdgeInsets.all(10),
+                                            shape: RoundedRectangleBorder(
+                                              borderRadius: BorderRadius.circular(8),
                                             ),
                                           ),
                                         ),
