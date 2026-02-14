@@ -83,12 +83,22 @@ class _MemoScreenState extends State<MemoScreen> {
       if (mounted) {
         if (memo != null) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('メモを保存しました'), backgroundColor: AppColors.success),
+            const SnackBar(
+              content: Text('メモを保存しました'),
+              backgroundColor: AppColors.success,
+              behavior: SnackBarBehavior.floating,
+              margin: EdgeInsets.all(20),
+            ),
           );
           _loadMemos();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('メモの保存に失敗しました'), backgroundColor: AppColors.error),
+            const SnackBar(
+              content: Text('メモの保存に失敗しました'),
+              backgroundColor: AppColors.error,
+              behavior: SnackBarBehavior.floating,
+              margin: EdgeInsets.all(20),
+            ),
           );
         }
       }
