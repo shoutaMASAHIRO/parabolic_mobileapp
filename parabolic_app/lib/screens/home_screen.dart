@@ -232,7 +232,12 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                     child: Row(
                       children: [
-                        Icon(cat.icon, color: AppColors.primaryLight),
+                        Icon(
+                          cat.icon, 
+                          color: cat == MarketCategory.crypto 
+                              ? AppColors.crypto 
+                              : (cat == MarketCategory.forex ? AppColors.forex : AppColors.stock)
+                        ),
                         const SizedBox(width: 16),
                         Text(cat.label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                         const Spacer(),

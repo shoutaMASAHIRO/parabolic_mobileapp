@@ -95,8 +95,24 @@ class _FavoritesScreenState extends State<FavoritesScreen> with SingleTickerProv
           unselectedLabelColor: AppColors.textSecondary,
           indicatorColor: AppColors.primary,
           indicatorWeight: 3,
-          labelStyle: const TextStyle(fontWeight: FontWeight.bold),
-          tabs: MarketCategory.values.map((cat) => Tab(text: cat.label)).toList(),
+          tabs: MarketCategory.values.map((cat) {
+            Color iconColor;
+            switch (cat) {
+              case MarketCategory.crypto: iconColor = AppColors.crypto; break;
+              case MarketCategory.forex: iconColor = AppColors.forex; break;
+              case MarketCategory.stock: iconColor = AppColors.stock; break;
+            }
+            return Tab(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(cat.icon, size: 18, color: iconColor),
+                  const SizedBox(width: 8),
+                  Text(cat.label),
+                ],
+              ),
+            );
+          }).toList(),
         ),
       ),
       body: _isLoading 

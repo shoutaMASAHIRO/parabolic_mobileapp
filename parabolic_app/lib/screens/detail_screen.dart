@@ -718,7 +718,13 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
                       ),
                       child: Row(
                         children: [
-                          Icon(cat.icon, color: widget.category == cat ? Colors.white : AppColors.textSecondary, size: 24),
+                          Icon(
+                            cat.icon, 
+                            color: cat == MarketCategory.crypto 
+                                ? AppColors.crypto 
+                                : (cat == MarketCategory.forex ? AppColors.forex : AppColors.stock),
+                            size: 24
+                          ),
                           const SizedBox(width: 16),
                           Text(
                             cat.label,
