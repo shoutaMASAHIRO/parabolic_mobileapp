@@ -85,7 +85,7 @@ class AssetListView extends StatelessWidget {
           child: const Row(
             children: [
               Expanded(flex: 3, child: Text('銘柄', style: TextStyle(fontSize: 12, color: AppColors.textSecondary))),
-              Expanded(flex: 4, child: Text('現在地', textAlign: TextAlign.right, style: TextStyle(fontSize: 12, color: AppColors.textSecondary))),
+              Expanded(flex: 4, child: Text('現在値', textAlign: TextAlign.right, style: TextStyle(fontSize: 12, color: AppColors.textSecondary))),
               Expanded(flex: 3, child: Text('前日比', textAlign: TextAlign.right, style: TextStyle(fontSize: 12, color: AppColors.textSecondary))),
             ],
           ),

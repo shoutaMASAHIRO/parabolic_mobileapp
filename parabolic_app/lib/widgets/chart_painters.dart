@@ -102,9 +102,47 @@ class ChartGridPainter extends CustomPainter {
   @override bool shouldRepaint(covariant ChartGridPainter old) => true;
 }
 
+class TrendIndicatorData {
+  final List<double?> values;
+  final Color color;
+  final double width;
+  final bool isDotted;
+  final bool isArea;
+  final Color? areaColor;
+  
+  TrendIndicatorData({
+    required this.values,
+    required this.color,
+    this.width = 1.0,
+    this.isDotted = false,
+    this.isArea = false,
+    this.areaColor,
+  });
+}
+
 class CandlestickPainter extends CustomPainter {
-  final List<Candle> candles; final double minY; final double maxY; final BollingerBandsResult? bb; final List<List<double?>>? emaLines; final int startIndex; final int xLabelInterval; final int indicatorStartIndex;
-  CandlestickPainter({required this.candles, required this.minY, required this.maxY, this.bb, this.emaLines, this.startIndex = 0, this.xLabelInterval = 5, this.indicatorStartIndex = 0});
+  final List<Candle> candles; 
+  final double minY; 
+  final double maxY; 
+  final List<TrendIndicatorData>? trendIndicators;
+  final List<double?>? parabolicSAR;
+  final List<bool>? supertrendIsBull; // For coloring supertrend line
+  final int startIndex; 
+  final int xLabelInterval; 
+  final int indicatorStartIndex;
+
+  CandlestickPainter({
+    required this.candles, 
+    required this.minY, 
+    required this.maxY, 
+    this.trendIndicators,
+    this.parabolicSAR,
+    this.supertrendIsBull,
+    this.startIndex = 0, 
+    this.xLabelInterval = 5, 
+    this.indicatorStartIndex = 0
+  });
+
   double _calculatePriceStep(double r) {
     if (r <= 0) return 1.0;
     double s = r / 12; double e = (math.log(s) / math.ln10).floorToDouble(); double m = math.pow(10, e).toDouble(); double rs = s / m;
@@ -125,6 +163,31 @@ class CandlestickPainter extends CustomPainter {
         double curY = 0; while (curY < size.height) { canvas.drawLine(Offset(x, curY), Offset(x, math.min(curY + 4, size.height)), gp); curY += 8; }
       }
     }
+
+    // トレンド系インジケーターの描画
+    if (trendIndicators != null) {
+      for (final indicator in trendIndicators!) {
+        _drawTrendLine(canvas, size, indicator, pr);
+      }
+    }
+
+    // パラボリックSARの描画（ドット）
+    if (parabolicSAR != null) {
+      final p = Paint()..style = PaintingStyle.fill;
+      for (int i = 0; i < parabolicSAR!.length; i++) {
+        final val = parabolicSAR![i];
+        if (val != null) {
+          final x = i * cw + cw / 2;
+          final y = size.height - ((val - minY) / pr * size.height);
+          if (y >= 0 && y <= size.height) {
+            p.color = candles[i].close >= val ? AppColors.rise : AppColors.fall;
+            canvas.drawCircle(Offset(x, y), 2.0, p);
+          }
+        }
+      }
+    }
+
+    // ローソク足の描画
     for (int i = indicatorStartIndex; i < candles.length; i++) {
       final c = candles[i]; final x = i * cw + cw / 2;
       final hy = size.height - ((c.high - minY) / pr * size.height); final ly = size.height - ((c.low - minY) / pr * size.height);
@@ -134,22 +197,58 @@ class CandlestickPainter extends CustomPainter {
       final bt = pos ? cy : oy; final bb = pos ? oy : cy;
       canvas.drawRect(Rect.fromCenter(center: Offset(x, (bt + bb) / 2), width: (cw * 0.8).clamp(1.0, 20.0), height: (bb - bt).abs().clamp(1.0, size.height)), Paint()..color = color..style = PaintingStyle.fill);
     }
-    if (bb != null) {
-      final bc = AppColors.bbMiddle.withOpacity(0.5);
-      _drawIL(canvas, size, bb!.middle, bc, 1.2, pr); _drawIL(canvas, size, bb!.upper1, bc.withOpacity(0.3), 0.8, pr); _drawIL(canvas, size, bb!.lower1, bc.withOpacity(0.3), 0.8, pr); _drawIL(canvas, size, bb!.upper2, bc.withOpacity(0.2), 0.8, pr); _drawIL(canvas, size, bb!.lower2, bc.withOpacity(0.2), 0.8, pr);
+  }
+
+  void _drawTrendLine(Canvas cv, Size s, TrendIndicatorData data, double pr) {
+    final p = Paint()
+      ..color = data.color
+      ..strokeWidth = data.width
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeJoin = StrokeJoin.round;
+
+    final path = Path();
+    bool started = false;
+    final cw = s.width / candles.length;
+
+    for (int i = 0; i < data.values.length; i++) {
+      final val = data.values[i];
+      if (val != null) {
+        final x = i * cw + cw / 2;
+        final y = s.height - ((val - minY) / pr * s.height);
+        if (!started) {
+          path.moveTo(x, y);
+          started = true;
+        } else {
+          path.lineTo(x, y);
+        }
+      } else {
+        started = false;
+      }
     }
-    if (emaLines != null) {
-      final colors = [AppColors.emaShort, AppColors.emaMedium, AppColors.emaLong];
-      for (int i = 0; i < emaLines!.length && i < colors.length; i++) _drawIL(canvas, size, emaLines![i], colors[i].withOpacity(0.8), 1.5, pr);
+
+    if (data.isDotted) {
+      // 簡易的な点線実装
+      final dashPath = Path();
+      double dashWidth = 5.0;
+      double dashSpace = 3.0;
+      double distance = 0.0;
+      for (ui.PathMetric measurePath in path.computeMetrics()) {
+        while (distance < measurePath.length) {
+          dashPath.addPath(measurePath.extractPath(distance, distance + dashWidth), Offset.zero);
+          distance += dashWidth + dashSpace;
+        }
+        distance = 0.0;
+      }
+      cv.drawPath(dashPath, p);
+    } else {
+      cv.drawPath(path, p);
     }
   }
-  void _drawIL(Canvas cv, Size s, List<double?> d, Color c, double w, double pr) {
-    final p = Paint()..color = c..strokeWidth = w..style = PaintingStyle.stroke; final path = Path(); bool started = false; final cw = s.width / candles.length;
-    for (int i = 0; i < d.length; i++) if (d[i] != null) { final x = i * cw + cw / 2; final y = s.height - ((d[i]! - minY) / pr * s.height); if (!started) { path.moveTo(x, y); started = true; } else path.lineTo(x, y); }
-    cv.drawPath(path, p);
-  }
-  @override bool shouldRepaint(covariant CandlestickPainter old) => old.candles != candles || old.minY != minY || old.maxY != maxY || old.bb != bb || old.emaLines != emaLines;
+
+  @override bool shouldRepaint(covariant CandlestickPainter old) => true;
 }
+
 
 class YAxisLabelPainter extends CustomPainter {
   final double minY, maxY;

@@ -58,10 +58,27 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
 
   bool get _showBB => widget.indicators['bb']?.enabled ?? false;
   bool get _showEMA => widget.indicators['ema']?.enabled ?? false;
+  bool get _showSMA => widget.indicators['sma']?.enabled ?? false;
+  bool get _showWMA => widget.indicators['wma']?.enabled ?? false;
+  bool get _showIchimoku => widget.indicators['ichimoku']?.enabled ?? false;
+  bool get _showParabolic => widget.indicators['parabolic']?.enabled ?? false;
+  bool get _showEnvelope => widget.indicators['envelope']?.enabled ?? false;
+  bool get _showKeltner => widget.indicators['keltner']?.enabled ?? false;
+  bool get _showSupertrend => widget.indicators['supertrend']?.enabled ?? false;
+  bool get _showGMMA => widget.indicators['gmma']?.enabled ?? false;
+
   bool get _showRSI => widget.indicators['rsi']?.enabled ?? false;
   bool get _showMACD => widget.indicators['macd']?.enabled ?? false;
   bool get _showStochastic => widget.indicators['stochastic']?.enabled ?? false;
   bool get _showCCI => widget.indicators['cci']?.enabled ?? false;
+  bool get _showMADev => widget.indicators['ma_dev']?.enabled ?? false;
+  bool get _showDMI => widget.indicators['dmi']?.enabled ?? false;
+  bool get _showADX => widget.indicators['adx']?.enabled ?? false;
+  bool get _showRCI => widget.indicators['rci']?.enabled ?? false;
+  bool get _showMomentum => widget.indicators['momentum']?.enabled ?? false;
+  bool get _showROC => widget.indicators['roc']?.enabled ?? false;
+  bool get _showUltimate => widget.indicators['ultimate']?.enabled ?? false;
+  bool get _showTRIX => widget.indicators['trix']?.enabled ?? false;
 
   int get _bbPeriod => _safeInt(widget.indicators['bb']?.params['period'], 20);
   double get _bbStdDev1 => _safeDouble(widget.indicators['bb']?.params['stdDev1'], 1.0);
@@ -69,6 +86,9 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
   int get _emaPeriod1 => _safeInt(widget.indicators['ema']?.params['period1'], 10);
   int get _emaPeriod2 => _safeInt(widget.indicators['ema']?.params['period2'], 25);
   int get _emaPeriod3 => _safeInt(widget.indicators['ema']?.params['period3'], 50);
+  int get _smaPeriod => _safeInt(widget.indicators['sma']?.params['period'], 20);
+  int get _wmaPeriod => _safeInt(widget.indicators['wma']?.params['period'], 20);
+  
   int get _rsiPeriod => _safeInt(widget.indicators['rsi']?.params['period'], 14);
   int get _macdFast => _safeInt(widget.indicators['macd']?.params['fast'], 12);
   int get _macdSlow => _safeInt(widget.indicators['macd']?.params['slow'], 26);
@@ -77,6 +97,12 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
   int get _stochDPeriod => _safeInt(widget.indicators['stochastic']?.params['dPeriod'], 3);
   int get _stochSmooth => _safeInt(widget.indicators['stochastic']?.params['smooth'], 3);
   int get _cciPeriod => _safeInt(widget.indicators['cci']?.params['period'], 20);
+  int get _maDevPeriod => _safeInt(widget.indicators['ma_dev']?.params['period'], 25);
+  int get _dmiPeriod => _safeInt(widget.indicators['dmi']?.params['period'], 14);
+  int get _rciPeriod => _safeInt(widget.indicators['rci']?.params['period'], 9);
+  int get _momentumPeriod => _safeInt(widget.indicators['momentum']?.params['period'], 10);
+  int get _rocPeriod => _safeInt(widget.indicators['roc']?.params['period'], 12);
+  int get _trixPeriod => _safeInt(widget.indicators['trix']?.params['period'], 12);
 
   static int _safeInt(dynamic v, int d) => v is int ? v : (v is num ? v.toInt() : (v is String ? int.tryParse(v) ?? d : d));
   static double _safeDouble(dynamic v, double d) => v is double ? v : (v is num ? v.toDouble() : (v is String ? double.tryParse(v) ?? d : d));
@@ -137,7 +163,17 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
   }
 
   Widget _buildLineChart(List<Candle> candles) {
-    int maxP = 0; if (_showBB) maxP = math.max(maxP, _bbPeriod); if (_showEMA) maxP = math.max(maxP, math.max(_emaPeriod1, math.max(_emaPeriod2, _emaPeriod3)));
+    int maxP = 0; 
+    if (_showBB) maxP = math.max(maxP, _bbPeriod); 
+    if (_showEMA) maxP = math.max(maxP, math.max(_emaPeriod1, math.max(_emaPeriod2, _emaPeriod3)));
+    if (_showSMA) maxP = math.max(maxP, _smaPeriod);
+    if (_showWMA) maxP = math.max(maxP, _wmaPeriod);
+    if (_showIchimoku) maxP = math.max(maxP, 52);
+    if (_showEnvelope) maxP = math.max(maxP, 20);
+    if (_showKeltner) maxP = math.max(maxP, 20);
+    if (_showSupertrend) maxP = math.max(maxP, 10);
+    if (_showGMMA) maxP = math.max(maxP, 60);
+
     final int startO = (maxP > 0) ? maxP - 1 : 0;
     final display = (startO > 0 && candles.length > startO) ? candles.sublist(startO) : candles;
     if (display.isEmpty) return const Center(child: Text('データ不足'));
@@ -150,21 +186,89 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
     double vMinY = visibleCandles.map((c) => c.low).reduce((a, b) => a < b ? a : b);
     double vMaxY = visibleCandles.map((c) => c.high).reduce((a, b) => a > b ? a : b);
 
+    final prices = candles.map((c) => c.close).toList();
+    final spots = display.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.close)).toList();
+    final isPos = display.last.close >= display.first.close;
+    final color = isPos ? AppColors.rise : AppColors.fall;
+    final lineBars = [LineChartBarData(spots: spots, isCurved: true, curveSmoothness: 0.2, color: color, barWidth: 2, isStrokeCapRound: true, dotData: const FlDotData(show: false), belowBarData: BarAreaData(show: true, color: color.withAlpha(30)))];
+
     if (_showBB) {
-      final bb = TechnicalIndicators.calculateBollingerBands(candles.map((c) => c.close).toList(), period: _bbPeriod, stdDev1: _bbStdDev1, stdDev2: _bbStdDev2);
-      final vUpper = _safeSublist(bb.upper2, visibleStart + startO, visibleEnd + startO + 1);
-      final vLower = _safeSublist(bb.lower2, visibleStart + startO, visibleEnd + startO + 1);
-      for (final v in vUpper) if (v != null && v > vMaxY) vMaxY = v;
-      for (final v in vLower) if (v != null && v < vMinY) vMinY = v;
+      final bb = TechnicalIndicators.calculateBollingerBands(prices, period: _bbPeriod, stdDev1: _bbStdDev1, stdDev2: _bbStdDev2);
+      lineBars.add(_createIndicatorLine(bb.middle.sublist(startO), display.length, AppColors.bbMiddle.withOpacity(0.6), 1.0));
+      lineBars.add(_createIndicatorLine(bb.upper1.sublist(startO), display.length, AppColors.bbMiddle.withOpacity(0.4), 0.75));
+      lineBars.add(_createIndicatorLine(bb.lower1.sublist(startO), display.length, AppColors.bbMiddle.withOpacity(0.4), 0.75));
+      lineBars.add(_createIndicatorLine(bb.upper2.sublist(startO), display.length, AppColors.bbMiddle.withOpacity(0.2), 0.75));
+      lineBars.add(_createIndicatorLine(bb.lower2.sublist(startO), display.length, AppColors.bbMiddle.withOpacity(0.2), 0.75));
+      final vU = _safeSublist(bb.upper2, visibleStart + startO, visibleEnd + startO + 1);
+      final vL = _safeSublist(bb.lower2, visibleStart + startO, visibleEnd + startO + 1);
+      for (final v in vU) if (v != null && v > vMaxY) vMaxY = v;
+      for (final v in vL) if (v != null && v < vMinY) vMinY = v;
     }
+
     if (_showEMA) {
-      final prices = candles.map((c) => c.close).toList();
-      final e1 = TechnicalIndicators.calculateEMA(prices, _emaPeriod1);
-      final e2 = TechnicalIndicators.calculateEMA(prices, _emaPeriod2);
-      final e3 = TechnicalIndicators.calculateEMA(prices, _emaPeriod3);
-      for (final e in [e1, e2, e3]) {
-        final ve = _safeSublist(e, visibleStart + startO, visibleEnd + startO + 1);
-        for (final v in ve) if (v != null) { if (v > vMaxY) vMaxY = v; if (v < vMinY) vMinY = v; }
+      final lines = [
+        TechnicalIndicators.calculateEMA(prices, _emaPeriod1),
+        TechnicalIndicators.calculateEMA(prices, _emaPeriod2),
+        TechnicalIndicators.calculateEMA(prices, _emaPeriod3)
+      ];
+      final colors = [AppColors.emaShort, AppColors.emaMedium, AppColors.emaLong];
+      for (int i = 0; i < lines.length; i++) {
+        lineBars.add(_createIndicatorLine(lines[i].sublist(startO), display.length, colors[i], 1.2));
+        final v = _safeSublist(lines[i], visibleStart + startO, visibleEnd + startO + 1);
+        for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+      }
+    }
+
+    if (_showSMA) {
+      final sma = TechnicalIndicators.calculateSMA(prices, _smaPeriod);
+      lineBars.add(_createIndicatorLine(sma.sublist(startO), display.length, Colors.teal, 1.2));
+      final v = _safeSublist(sma, visibleStart + startO, visibleEnd + startO + 1);
+      for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+    }
+
+    if (_showWMA) {
+      final wma = TechnicalIndicators.calculateWMA(prices, _wmaPeriod);
+      lineBars.add(_createIndicatorLine(wma.sublist(startO), display.length, Colors.indigo, 1.2));
+      final v = _safeSublist(wma, visibleStart + startO, visibleEnd + startO + 1);
+      for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+    }
+
+    if (_showIchimoku) {
+      final ichi = TechnicalIndicators.calculateIchimoku(candles);
+      lineBars.add(_createIndicatorLine(ichi.tenkan.sublist(startO), display.length, Colors.red, 1.0));
+      lineBars.add(_createIndicatorLine(ichi.kijun.sublist(startO), display.length, Colors.blue, 1.0));
+      lineBars.add(_createIndicatorLine(ichi.senkouA.sublist(startO), display.length, Colors.green.withOpacity(0.5), 0.8));
+      lineBars.add(_createIndicatorLine(ichi.senkouB.sublist(startO), display.length, Colors.red.withOpacity(0.5), 0.8));
+      lineBars.add(_createIndicatorLine(ichi.chikou.sublist(startO), display.length, Colors.purple.withOpacity(0.5), 1.0));
+      for (final line in [ichi.tenkan, ichi.kijun, ichi.senkouA, ichi.senkouB]) {
+        final v = _safeSublist(line, visibleStart + startO, visibleEnd + startO + 1);
+        for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+      }
+    }
+
+    if (_showParabolic) {
+      final sar = TechnicalIndicators.calculateParabolicSAR(candles);
+      final spotsSAR = <FlSpot>[];
+      for (int i = 0; i < display.length; i++) {
+        final val = sar[i + startO];
+        if (val != null) spotsSAR.add(FlSpot(i.toDouble(), val));
+      }
+      lineBars.add(LineChartBarData(spots: spotsSAR, show: true, color: Colors.amber, barWidth: 0, dotData: FlDotData(show: true, getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(radius: 2, color: Colors.amber))));
+      final v = _safeSublist(sar, visibleStart + startO, visibleEnd + startO + 1);
+      for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+    }
+
+    if (_showGMMA) {
+      final gmma = TechnicalIndicators.calculateGMMA(prices);
+      for (final line in gmma.shortTerm) {
+        lineBars.add(_createIndicatorLine(line.sublist(startO), display.length, Colors.cyan.withOpacity(0.5), 0.7));
+        final v = _safeSublist(line, visibleStart + startO, visibleEnd + startO + 1);
+        for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+      }
+      for (final line in gmma.longTerm) {
+        lineBars.add(_createIndicatorLine(line.sublist(startO), display.length, Colors.blue.withOpacity(0.5), 0.7));
+        final v = _safeSublist(line, visibleStart + startO, visibleEnd + startO + 1);
+        for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
       }
     }
 
@@ -175,24 +279,7 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
     final xInt = _calculateXLabelInterval(visibleCandles.length);
     final originalStart = (visibleStart + startO).clamp(0, candles.length);
     final originalEnd = (visibleEnd + startO + 1).clamp(originalStart, candles.length);
-    final spots = display.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.close)).toList();
-    final isPos = display.last.close >= display.first.close;
-    final color = isPos ? AppColors.rise : AppColors.fall;
-    final lineBars = [LineChartBarData(spots: spots, isCurved: true, curveSmoothness: 0.2, color: color, barWidth: 2, isStrokeCapRound: true, dotData: const FlDotData(show: false), belowBarData: BarAreaData(show: true, color: color.withAlpha(30)))];
-    if (_showBB) {
-      final bb = TechnicalIndicators.calculateBollingerBands(candles.map((c) => c.close).toList(), period: _bbPeriod, stdDev1: _bbStdDev1, stdDev2: _bbStdDev2);
-      lineBars.add(_createIndicatorLine(bb.middle.sublist(startO), display.length, Colors.pink.shade700.withOpacity(0.6), 1.0));
-      lineBars.add(_createIndicatorLine(bb.upper1.sublist(startO), display.length, Colors.purple.withOpacity(0.6), 0.75));
-      lineBars.add(_createIndicatorLine(bb.lower1.sublist(startO), display.length, Colors.purple.withOpacity(0.6), 0.75));
-      lineBars.add(_createIndicatorLine(bb.upper2.sublist(startO), display.length, Colors.pink.withOpacity(0.6), 0.75));
-      lineBars.add(_createIndicatorLine(bb.lower2.sublist(startO), display.length, Colors.pink.withOpacity(0.6), 0.75));
-    }
-    if (_showEMA) {
-      final prices = candles.map((c) => c.close).toList();
-      lineBars.add(_createIndicatorLine(TechnicalIndicators.calculateEMA(prices, _emaPeriod1).sublist(startO), display.length, AppColors.emaShort, 1.2));
-      lineBars.add(_createIndicatorLine(TechnicalIndicators.calculateEMA(prices, _emaPeriod2).sublist(startO), display.length, AppColors.emaMedium, 1.2));
-      lineBars.add(_createIndicatorLine(TechnicalIndicators.calculateEMA(prices, _emaPeriod3).sublist(startO), display.length, AppColors.emaLong, 1.2));
-    }
+    
     return Padding(
       padding: const EdgeInsets.only(bottom: 4, right: 8),
       child: Column(children: [
@@ -220,7 +307,17 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
   }
 
   Widget _buildCandlestickChart(List<Candle> candles) {
-    int maxP = 0; if (_showBB) maxP = math.max(maxP, _bbPeriod); if (_showEMA) maxP = math.max(maxP, math.max(_emaPeriod1, math.max(_emaPeriod2, _emaPeriod3)));
+    int maxP = 0; 
+    if (_showBB) maxP = math.max(maxP, _bbPeriod); 
+    if (_showEMA) maxP = math.max(maxP, math.max(_emaPeriod1, math.max(_emaPeriod2, _emaPeriod3)));
+    if (_showSMA) maxP = math.max(maxP, _smaPeriod);
+    if (_showWMA) maxP = math.max(maxP, _wmaPeriod);
+    if (_showIchimoku) maxP = math.max(maxP, 52);
+    if (_showEnvelope) maxP = math.max(maxP, 20);
+    if (_showKeltner) maxP = math.max(maxP, 20);
+    if (_showSupertrend) maxP = math.max(maxP, 10);
+    if (_showGMMA) maxP = math.max(maxP, 60);
+
     final int startO = (maxP > 0) ? maxP - 1 : 0;
     final display = (startO > 0 && candles.length > startO) ? candles.sublist(startO) : candles;
     if (display.isEmpty) return const Center(child: Text('データ不足'));
@@ -236,18 +333,105 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
 
     final originalStart = (visibleStart + startO).clamp(0, candles.length);
     final originalEnd = (visibleEnd + startO).clamp(originalStart, candles.length);
-    BollingerBandsResult? vBB; List<List<double?>>? vEMA;
+    final prices = candles.map((c) => c.close).toList();
+
+    final List<TrendIndicatorData> trendIndicators = [];
+    List<double?>? parabolicSAR;
 
     if (_showBB) {
-      final bb = TechnicalIndicators.calculateBollingerBands(candles.map((c) => c.close).toList(), period: _bbPeriod, stdDev1: _bbStdDev1, stdDev2: _bbStdDev2);
-      vBB = BollingerBandsResult(middle: _safeSublist(bb.middle, originalStart, originalEnd), upper1: _safeSublist(bb.upper1, originalStart, originalEnd), lower1: _safeSublist(bb.lower1, originalStart, originalEnd), upper2: _safeSublist(bb.upper2, originalStart, originalEnd), lower2: _safeSublist(bb.lower2, originalStart, originalEnd));
-      for (final v in vBB.upper2) if (v != null && v > vMaxY) vMaxY = v;
-      for (final v in vBB.lower2) if (v != null && v < vMinY) vMinY = v;
+      final bb = TechnicalIndicators.calculateBollingerBands(prices, period: _bbPeriod, stdDev1: _bbStdDev1, stdDev2: _bbStdDev2);
+      trendIndicators.add(TrendIndicatorData(values: _safeSublist(bb.middle, originalStart, originalEnd), color: AppColors.bbMiddle.withOpacity(0.5), width: 1.2));
+      trendIndicators.add(TrendIndicatorData(values: _safeSublist(bb.upper1, originalStart, originalEnd), color: AppColors.bbMiddle.withOpacity(0.3), width: 0.8));
+      trendIndicators.add(TrendIndicatorData(values: _safeSublist(bb.lower1, originalStart, originalEnd), color: AppColors.bbMiddle.withOpacity(0.3), width: 0.8));
+      final vU2 = _safeSublist(bb.upper2, originalStart, originalEnd);
+      final vL2 = _safeSublist(bb.lower2, originalStart, originalEnd);
+      trendIndicators.add(TrendIndicatorData(values: vU2, color: AppColors.bbMiddle.withOpacity(0.2), width: 0.8));
+      trendIndicators.add(TrendIndicatorData(values: vL2, color: AppColors.bbMiddle.withOpacity(0.2), width: 0.8));
+      for (final v in vU2) if (v != null && v > vMaxY) vMaxY = v;
+      for (final v in vL2) if (v != null && v < vMinY) vMinY = v;
     }
+
     if (_showEMA) {
-      final prices = candles.map((c) => c.close).toList();
-      vEMA = [_safeSublist(TechnicalIndicators.calculateEMA(prices, _emaPeriod1), originalStart, originalEnd), _safeSublist(TechnicalIndicators.calculateEMA(prices, _emaPeriod2), originalStart, originalEnd), _safeSublist(TechnicalIndicators.calculateEMA(prices, _emaPeriod3), originalStart, originalEnd)];
-      for (final e in vEMA) for (final v in e) if (v != null) { if (v > vMaxY) vMaxY = v; if (v < vMinY) vMinY = v; }
+      final e1 = TechnicalIndicators.calculateEMA(prices, _emaPeriod1);
+      final e2 = TechnicalIndicators.calculateEMA(prices, _emaPeriod2);
+      final e3 = TechnicalIndicators.calculateEMA(prices, _emaPeriod3);
+      final colors = [AppColors.emaShort, AppColors.emaMedium, AppColors.emaLong];
+      final lines = [e1, e2, e3];
+      for (int i = 0; i < lines.length; i++) {
+        final v = _safeSublist(lines[i], originalStart, originalEnd);
+        trendIndicators.add(TrendIndicatorData(values: v, color: colors[i].withOpacity(0.8), width: 1.5));
+        for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+      }
+    }
+
+    if (_showSMA) {
+      final v = _safeSublist(TechnicalIndicators.calculateSMA(prices, _smaPeriod), originalStart, originalEnd);
+      trendIndicators.add(TrendIndicatorData(values: v, color: Colors.teal.withOpacity(0.8), width: 1.5));
+      for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+    }
+
+    if (_showWMA) {
+      final v = _safeSublist(TechnicalIndicators.calculateWMA(prices, _wmaPeriod), originalStart, originalEnd);
+      trendIndicators.add(TrendIndicatorData(values: v, color: Colors.indigo.withOpacity(0.8), width: 1.5));
+      for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+    }
+
+    if (_showIchimoku) {
+      final ichi = TechnicalIndicators.calculateIchimoku(candles);
+      trendIndicators.add(TrendIndicatorData(values: _safeSublist(ichi.tenkan, originalStart, originalEnd), color: Colors.red.withOpacity(0.7), width: 1.0));
+      trendIndicators.add(TrendIndicatorData(values: _safeSublist(ichi.kijun, originalStart, originalEnd), color: Colors.blue.withOpacity(0.7), width: 1.0));
+      trendIndicators.add(TrendIndicatorData(values: _safeSublist(ichi.senkouA, originalStart, originalEnd), color: Colors.green.withOpacity(0.3), width: 0.8));
+      trendIndicators.add(TrendIndicatorData(values: _safeSublist(ichi.senkouB, originalStart, originalEnd), color: Colors.red.withOpacity(0.3), width: 0.8));
+      trendIndicators.add(TrendIndicatorData(values: _safeSublist(ichi.chikou, originalStart, originalEnd), color: Colors.purple.withOpacity(0.5), width: 1.0));
+      // Adjust vMaxY/vMinY for Ichimoku
+      for (final line in [ichi.tenkan, ichi.kijun, ichi.senkouA, ichi.senkouB]) {
+        final v = _safeSublist(line, originalStart, originalEnd);
+        for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+      }
+    }
+
+    if (_showParabolic) {
+      parabolicSAR = _safeSublist(TechnicalIndicators.calculateParabolicSAR(candles), originalStart, originalEnd);
+      for (final x in parabolicSAR) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+    }
+
+    if (_showEnvelope) {
+      final env = TechnicalIndicators.calculateEnvelope(prices);
+      final vU = _safeSublist(env.upper, originalStart, originalEnd);
+      final vL = _safeSublist(env.lower, originalStart, originalEnd);
+      trendIndicators.add(TrendIndicatorData(values: vU, color: Colors.purpleAccent.withOpacity(0.6), width: 1.0));
+      trendIndicators.add(TrendIndicatorData(values: vL, color: Colors.purpleAccent.withOpacity(0.6), width: 1.0));
+      for (final x in vU) if (x != null && x > vMaxY) vMaxY = x;
+      for (final x in vL) if (x != null && x < vMinY) vMinY = x;
+    }
+
+    if (_showKeltner) {
+      final kc = TechnicalIndicators.calculateKeltnerChannel(candles);
+      final vU = _safeSublist(kc.upper, originalStart, originalEnd);
+      final vL = _safeSublist(kc.lower, originalStart, originalEnd);
+      trendIndicators.add(TrendIndicatorData(values: vU, color: Colors.lightGreen.withOpacity(0.6), width: 1.0));
+      trendIndicators.add(TrendIndicatorData(values: vL, color: Colors.lightGreen.withOpacity(0.6), width: 1.0));
+      for (final x in vU) if (x != null && x > vMaxY) vMaxY = x;
+      for (final x in vL) if (x != null && x < vMinY) vMinY = x;
+    }
+
+    if (_showSupertrend) {
+      final st = TechnicalIndicators.calculateSupertrend(candles);
+      final v = _safeSublist(st.values, originalStart, originalEnd);
+      trendIndicators.add(TrendIndicatorData(values: v, color: Colors.deepOrange.withOpacity(0.8), width: 2.0));
+      for (final x in v) if (x != null) { if (x > vMaxY) vMaxY = x; if (x < vMinY) vMinY = x; }
+    }
+
+    if (_showGMMA) {
+      final gmma = TechnicalIndicators.calculateGMMA(prices);
+      for (final line in gmma.shortTerm) {
+        final v = _safeSublist(line, originalStart, originalEnd);
+        trendIndicators.add(TrendIndicatorData(values: v, color: Colors.cyan.withOpacity(0.3), width: 0.8));
+      }
+      for (final line in gmma.longTerm) {
+        final v = _safeSublist(line, originalStart, originalEnd);
+        trendIndicators.add(TrendIndicatorData(values: v, color: Colors.blue.withOpacity(0.3), width: 0.8));
+      }
     }
 
     final pad = (vMaxY - vMinY) * 0.1;
@@ -267,7 +451,7 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
           ),
           child: Stack(children: [
             CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: ChartGridPainter(dataLength: visibleCandles.length, xLabelInterval: xInt, minY: adjMinY, maxY: adjMaxY, startIndex: visibleStart, latestPrice: widget.candles.isNotEmpty ? widget.candles.last.close : null, touchedPrice: _touchedPrice, touchedDateTime: _touchedDateTime, candles: visibleCandles)),
-            CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: CandlestickPainter(candles: visibleCandles, minY: adjMinY, maxY: adjMaxY, bb: vBB, emaLines: vEMA, startIndex: visibleStart, xLabelInterval: xInt, indicatorStartIndex: 0)),
+            CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: CandlestickPainter(candles: visibleCandles, minY: adjMinY, maxY: adjMaxY, trendIndicators: trendIndicators, parabolicSAR: parabolicSAR, startIndex: visibleStart, xLabelInterval: xInt, indicatorStartIndex: 0)),
           ]),
         )))),
         _buildYAxisLabels(adjMinY, adjMaxY),
@@ -280,6 +464,7 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
       if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length) _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
     ]));
   }
+
 
   Widget _buildInteractiveChartWrapper({required double chartHeight, required List<Candle> visibleCandles, required int visibleStartIdx, required Widget child}) {
     return Listener(
@@ -478,7 +663,7 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
     return LineChartBarData(spots: spots, isCurved: true, curveSmoothness: 0.2, color: color, barWidth: width, isStrokeCapRound: true, dotData: const FlDotData(show: false), belowBarData: BarAreaData(show: false));
   }
 
-  bool get _hasActiveOscillator => _showRSI || _showMACD || _showStochastic || _showCCI;
+  bool get _hasActiveOscillator => _showRSI || _showMACD || _showStochastic || _showCCI || _showMADev || _showDMI || _showADX || _showRCI || _showMomentum || _showROC || _showUltimate || _showTRIX;
   List<T> _safeSublist<T>(List<T> list, int s, int e) { final se = e.clamp(0, list.length); final ss = s.clamp(0, se); return list.sublist(ss, se); }
 
   Widget _buildOscillatorPanels(List<Candle> candles, int visibleStartIdx, int visibleEndIdx, int xInt, int panelStartIndex) {
@@ -516,6 +701,63 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
         double mn = -100, mx = 100; for (final x in vc) if (x != null) { mn = math.min(mn, x); mx = math.max(mx, x); }
         final p = (mx - mn) * 0.1;
         panels.add(_buildSingleOscillatorPanel(title: 'CCI', values: vc, minY: mn - p, maxY: mx + p, lineColor: AppColors.cciLine, oscillatorType: 'cci', startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
+      }
+    }
+    if (_showMADev) {
+      final dev = OscillatorIndicators.calculateMADeviation(prices, period: _maDevPeriod);
+      final v = _safeSublist(dev, visibleStartIdx, visibleEndIdx);
+      if (v.isNotEmpty) {
+        double mn = -5, mx = 5; for (final x in v) if (x != null) { mn = math.min(mn, x); mx = math.max(mx, x); }
+        final p = (mx - mn) * 0.1;
+        panels.add(_buildSingleOscillatorPanel(title: '乖離率', values: v, minY: mn - p, maxY: mx + p, lineColor: Colors.blueGrey, oscillatorType: 'ma_dev', startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
+      }
+    }
+    if (_showDMI) {
+      final dmi = OscillatorIndicators.calculateDMI(candles, period: _dmiPeriod);
+      final vp = _safeSublist(dmi.plusDI, visibleStartIdx, visibleEndIdx);
+      final vm = _safeSublist(dmi.minusDI, visibleStartIdx, visibleEndIdx);
+      if (vp.isNotEmpty) panels.add(_buildSingleOscillatorPanel(title: 'DMI', values: vp, minY: 0, maxY: 100, lineColor: Colors.pinkAccent, oscillatorType: 'dmi', signalLine: vm, startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
+    }
+    if (_showADX) {
+      final dmi = OscillatorIndicators.calculateDMI(candles, period: _dmiPeriod);
+      final va = _safeSublist(dmi.adx, visibleStartIdx, visibleEndIdx);
+      if (va.isNotEmpty) panels.add(_buildSingleOscillatorPanel(title: 'ADX', values: va, minY: 0, maxY: 100, lineColor: Colors.deepPurple, oscillatorType: 'adx', startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
+    }
+    if (_showRCI) {
+      final rci = OscillatorIndicators.calculateRCI(prices, period: _rciPeriod);
+      final v = _safeSublist(rci, visibleStartIdx, visibleEndIdx);
+      if (v.isNotEmpty) panels.add(_buildSingleOscillatorPanel(title: 'RCI', values: v, minY: -100, maxY: 100, lineColor: Colors.brown, oscillatorType: 'rci', startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
+    }
+    if (_showMomentum) {
+      final mom = OscillatorIndicators.calculateMomentum(prices, period: _momentumPeriod);
+      final v = _safeSublist(mom, visibleStartIdx, visibleEndIdx);
+      if (v.isNotEmpty) {
+        double mn = 0, mx = 0; for (final x in v) if (x != null) { mn = math.min(mn, x); mx = math.max(mx, x); }
+        final p = (mx - mn) * 0.1;
+        panels.add(_buildSingleOscillatorPanel(title: 'Mom', values: v, minY: mn - p, maxY: mx + p, lineColor: Colors.lime, oscillatorType: 'momentum', startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
+      }
+    }
+    if (_showROC) {
+      final roc = OscillatorIndicators.calculateROC(prices, period: _rocPeriod);
+      final v = _safeSublist(roc, visibleStartIdx, visibleEndIdx);
+      if (v.isNotEmpty) {
+        double mn = 0, mx = 0; for (final x in v) if (x != null) { mn = math.min(mn, x); mx = math.max(mx, x); }
+        final p = (mx - mn) * 0.1;
+        panels.add(_buildSingleOscillatorPanel(title: 'ROC', values: v, minY: mn - p, maxY: mx + p, lineColor: Colors.orangeAccent, oscillatorType: 'roc', startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
+      }
+    }
+    if (_showUltimate) {
+      final uo = OscillatorIndicators.calculateUltimateOscillator(candles);
+      final v = _safeSublist(uo, visibleStartIdx, visibleEndIdx);
+      if (v.isNotEmpty) panels.add(_buildSingleOscillatorPanel(title: 'UO', values: v, minY: 0, maxY: 100, lineColor: Colors.deepPurpleAccent, oscillatorType: 'ultimate', startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
+    }
+    if (_showTRIX) {
+      final trix = OscillatorIndicators.calculateTRIX(prices, period: _trixPeriod);
+      final v = _safeSublist(trix, visibleStartIdx, visibleEndIdx);
+      if (v.isNotEmpty) {
+        double mn = 0, mx = 0; for (final x in v) if (x != null) { mn = math.min(mn, x); mx = math.max(mx, x); }
+        final p = (mx - mn) * 0.1;
+        panels.add(_buildSingleOscillatorPanel(title: 'TRIX', values: v, minY: mn - p, maxY: mx + p, lineColor: Colors.blueAccent, oscillatorType: 'trix', startIndex: panelStartIndex, xLabelInterval: xInt, visibleCandles: visibleCandlesSubset));
       }
     }
     return Column(children: panels);

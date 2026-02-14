@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../models/chart_configs.dart';
 import '../theme/app_colors.dart';
 import '../services/chart_service.dart';
 import '../services/cross_detection_service.dart';
@@ -10,9 +11,12 @@ class CrossSettingsModal extends StatefulWidget {
   final String interval;
   final List<CrossEvent> crossHistory;
   final double? threshold;
+  final String targetIndicator;
+  final Map<String, IndicatorSettings> indicators;
   final bool emailNotificationEnabled;
   final double? currentPrice;
   final Function(double?) onThresholdChanged;
+  final Function(String) onTargetIndicatorChanged;
   final Function(bool) onEmailNotificationChanged;
   final VoidCallback onClearHistory;
 
@@ -22,9 +26,12 @@ class CrossSettingsModal extends StatefulWidget {
     required this.interval,
     required this.crossHistory,
     required this.threshold,
+    required this.targetIndicator,
+    required this.indicators,
     required this.emailNotificationEnabled,
     required this.currentPrice,
     required this.onThresholdChanged,
+    required this.onTargetIndicatorChanged,
     required this.onEmailNotificationChanged,
     required this.onClearHistory,
   });
@@ -249,6 +256,57 @@ ${e.displayName} のラインを価格が【$directionText】しました。
                       shrinkWrap: true,
                       padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                       children: [
+                        _buildSectionLabel('判定対象インジケーター'),
+                        Container(
+                          padding: const EdgeInsets.all(16),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withAlpha(15),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white.withAlpha(20)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'チャートに表示中の指標からクロス判定対象を選択します',
+                                style: TextStyle(color: AppColors.textSecondary.withOpacity(0.9), fontSize: 12),
+                              ),
+                              const SizedBox(height: 12),
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 8,
+                                children: _getEnabledTrendIndicators().map((key) {
+                                  final isSelected = widget.targetIndicator == key;
+                                  return ChoiceChip(
+                                    label: Text(_getIndicatorName(key)),
+                                    selected: isSelected,
+                                    selectedColor: AppColors.primary.withOpacity(0.4),
+                                    backgroundColor: Colors.white.withAlpha(10),
+                                    labelStyle: TextStyle(
+                                      color: isSelected ? Colors.white : AppColors.textSecondary,
+                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                      fontSize: 13,
+                                    ),
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                      side: BorderSide(color: isSelected ? AppColors.primaryLight : Colors.transparent),
+                                    ),
+                                    onSelected: (v) {
+                                      if (v) widget.onTargetIndicatorChanged(key);
+                                    },
+                                  );
+                                }).toList(),
+                              ),
+                              if (_getEnabledTrendIndicators().isEmpty)
+                                const Padding(
+                                  padding: EdgeInsets.only(top: 8),
+                                  child: Text('有効なトレンド系指標がありません。インジケーター設定から表示してください。', style: TextStyle(color: AppColors.error, fontSize: 11)),
+                                ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 24),
                         _buildSectionLabel('アラート閾値設定'),
                         Container(
                           padding: const EdgeInsets.all(20),
@@ -644,4 +702,25 @@ ${e.displayName} のラインを価格が【$directionText】しました。
           ],
         ),
       );
+
+  List<String> _getEnabledTrendIndicators() {
+    const trendKeys = ['bb', 'ema', 'sma', 'wma', 'ichimoku', 'parabolic', 'envelope', 'keltner', 'supertrend', 'gmma'];
+    return trendKeys.where((k) => widget.indicators[k]?.enabled ?? false).toList();
+  }
+
+  String _getIndicatorName(String key) {
+    switch (key) {
+      case 'bb': return 'ボリンジャーバンド';
+      case 'ema': return 'EMA';
+      case 'sma': return 'SMA';
+      case 'wma': return 'WMA';
+      case 'ichimoku': return '一目均衡表';
+      case 'parabolic': return 'パラボリック';
+      case 'envelope': return 'エンベロープ';
+      case 'keltner': return 'ケルトナー';
+      case 'supertrend': return 'スーパートレンド';
+      case 'gmma': return 'GMMA';
+      default: return key.toUpperCase();
+    }
+  }
 }
