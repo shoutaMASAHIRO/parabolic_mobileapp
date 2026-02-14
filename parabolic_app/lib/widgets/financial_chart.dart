@@ -293,6 +293,7 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
           child: Stack(children: [
             CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: ChartGridPainter(dataLength: visibleCandles.length, xLabelInterval: xInt, minY: adjMinY, maxY: adjMaxY, startIndex: visibleStart, latestPrice: widget.candles.isNotEmpty ? widget.candles.last.close : null, touchedPrice: _touchedPrice, touchedDateTime: _touchedDateTime, candles: visibleCandles)),
             LineChart(LineChartData(gridData: const FlGridData(show: false), titlesData: const FlTitlesData(show: false), borderData: FlBorderData(show: false), minX: pan, maxX: pan + visible - 1, minY: adjMinY, maxY: adjMaxY, lineBarsData: lineBars, clipData: const FlClipData.all(), lineTouchData: const LineTouchData(enabled: false))),
+            _buildMainChartIndicatorLabels(), // インジケーターラベルを追加
           ]),
         )))),
         _buildYAxisLabels(adjMinY, adjMaxY),
@@ -452,6 +453,7 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
           child: Stack(children: [
             CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: ChartGridPainter(dataLength: visibleCandles.length, xLabelInterval: xInt, minY: adjMinY, maxY: adjMaxY, startIndex: visibleStart, latestPrice: widget.candles.isNotEmpty ? widget.candles.last.close : null, touchedPrice: _touchedPrice, touchedDateTime: _touchedDateTime, candles: visibleCandles)),
             CustomPaint(size: Size(cs.maxWidth, cs.maxHeight), painter: CandlestickPainter(candles: visibleCandles, minY: adjMinY, maxY: adjMaxY, trendIndicators: trendIndicators, parabolicSAR: parabolicSAR, startIndex: visibleStart, xLabelInterval: xInt, indicatorStartIndex: 0)),
+            _buildMainChartIndicatorLabels(), // インジケーターラベルを追加
           ]),
         )))),
         _buildYAxisLabels(adjMinY, adjMaxY),
@@ -463,6 +465,59 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
       ]),
       if (_showCrosshair && _crosshairIndex != null && _crosshairIndex! < visibleCandles.length) _buildCrosshairInfo(visibleCandles[_crosshairIndex!]),
     ]));
+  }
+
+  Widget _buildMainChartIndicatorLabels() {
+    final List<Map<String, dynamic>> activeInfos = [];
+    if (_showBB) activeInfos.add({'t': 'BB($_bbPeriod)', 'c': AppColors.bbMiddle});
+    if (_showEMA) activeInfos.add({'t': 'EMA($_emaPeriod1, $_emaPeriod2, $_emaPeriod3)', 'c': AppColors.emaMedium});
+    if (_showSMA) activeInfos.add({'t': 'SMA($_smaPeriod)', 'c': Colors.teal});
+    if (_showWMA) activeInfos.add({'t': 'WMA($_wmaPeriod)', 'c': Colors.indigo});
+    if (_showIchimoku) activeInfos.add({'t': '一目均衡表', 'c': Colors.redAccent});
+    if (_showParabolic) activeInfos.add({'t': 'SAR', 'c': Colors.amber});
+    if (_showEnvelope) activeInfos.add({'t': 'Env', 'c': Colors.purpleAccent});
+    if (_showKeltner) activeInfos.add({'t': 'KC', 'c': Colors.lightGreen});
+    if (_showSupertrend) activeInfos.add({'t': 'ST', 'c': Colors.deepOrange});
+    if (_showGMMA) activeInfos.add({'t': 'GMMA', 'c': Colors.cyan});
+
+    if (activeInfos.isEmpty) return const SizedBox.shrink();
+
+    final List<Widget> rows = [];
+    for (int i = 0; i < activeInfos.length; i += 2) {
+      final List<Widget> rowItems = [];
+      // 1列目
+      rowItems.add(_buildIndicatorLabelItem(activeInfos[i]['t'], activeInfos[i]['c']));
+      
+      // 2列目（存在する場合）
+      if (i + 1 < activeInfos.length) {
+        rowItems.add(const SizedBox(width: 16)); // 間隔を少し広げる
+        rowItems.add(_buildIndicatorLabelItem(activeInfos[i + 1]['t'], activeInfos[i + 1]['c']));
+      }
+      
+      rows.add(Row(mainAxisSize: MainAxisSize.min, children: rowItems));
+      if (i + 2 < activeInfos.length) rows.add(const SizedBox(height: 4)); // 行間を少し広げる
+    }
+
+    return Positioned(
+      top: 6, // 少し下に下げる
+      left: 6, // 少し右に寄せる
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: rows,
+      ),
+    );
+  }
+
+  Widget _buildIndicatorLabelItem(String text, Color color) {
+    return Text(
+      text,
+      style: TextStyle(
+        fontSize: 13, // オシレーターと同じサイズ
+        fontWeight: FontWeight.bold,
+        color: color.withOpacity(0.9),
+        backgroundColor: AppColors.chartBackground.withOpacity(0.5),
+      ),
+    );
   }
 
 

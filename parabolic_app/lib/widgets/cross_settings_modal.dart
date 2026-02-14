@@ -11,12 +11,12 @@ class CrossSettingsModal extends StatefulWidget {
   final String interval;
   final List<CrossEvent> crossHistory;
   final double? threshold;
-  final String targetIndicator;
+  final List<String> targetIndicators;
   final Map<String, IndicatorSettings> indicators;
   final bool emailNotificationEnabled;
   final double? currentPrice;
   final Function(double?) onThresholdChanged;
-  final Function(String) onTargetIndicatorChanged;
+  final Function(List<String>) onTargetIndicatorsChanged;
   final Function(bool) onEmailNotificationChanged;
   final VoidCallback onClearHistory;
 
@@ -26,12 +26,12 @@ class CrossSettingsModal extends StatefulWidget {
     required this.interval,
     required this.crossHistory,
     required this.threshold,
-    required this.targetIndicator,
+    required this.targetIndicators,
     required this.indicators,
     required this.emailNotificationEnabled,
     required this.currentPrice,
     required this.onThresholdChanged,
-    required this.onTargetIndicatorChanged,
+    required this.onTargetIndicatorsChanged,
     required this.onEmailNotificationChanged,
     required this.onClearHistory,
   });
@@ -44,6 +44,7 @@ class _CrossSettingsModalState extends State<CrossSettingsModal> {
   final ChartService _cs = ChartService();
   late TextEditingController _tc, _ec;
   late bool _ee;
+  late List<String> _selectedIndicators; // 複数選択用に変更
   List<String> _emails = [];
   bool _le = false;
 
@@ -53,6 +54,7 @@ class _CrossSettingsModalState extends State<CrossSettingsModal> {
     _tc = TextEditingController(text: widget.threshold?.toStringAsFixed(2) ?? '');
     _ec = TextEditingController();
     _ee = widget.emailNotificationEnabled;
+    _selectedIndicators = List.from(widget.targetIndicators);
     _load();
   }
 
@@ -274,27 +276,51 @@ ${e.displayName} のラインを価格が【$directionText】しました。
                               const SizedBox(height: 12),
                               Wrap(
                                 spacing: 8,
-                                runSpacing: 8,
+                                runSpacing: 10,
                                 children: _getEnabledTrendIndicators().map((key) {
-                                  final isSelected = widget.targetIndicator == key;
-                                  return ChoiceChip(
-                                    label: Text(_getIndicatorName(key)),
-                                    selected: isSelected,
-                                    selectedColor: AppColors.primary.withOpacity(0.4),
-                                    backgroundColor: Colors.white.withAlpha(10),
-                                    labelStyle: TextStyle(
-                                      color: isSelected ? Colors.white : AppColors.textSecondary,
-                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                      fontSize: 13,
-                                    ),
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                      side: BorderSide(color: isSelected ? AppColors.primaryLight : Colors.transparent),
-                                    ),
-                                    onSelected: (v) {
-                                      if (v) widget.onTargetIndicatorChanged(key);
+                                  final isSelected = _selectedIndicators.contains(key);
+                                  return GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        if (isSelected) {
+                                          _selectedIndicators.remove(key);
+                                        } else {
+                                          _selectedIndicators.add(key);
+                                        }
+                                      });
+                                      widget.onTargetIndicatorsChanged(_selectedIndicators);
                                     },
+                                    child: AnimatedContainer(
+                                      duration: const Duration(milliseconds: 200),
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        color: isSelected ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(
+                                          color: isSelected ? AppColors.primaryLight : Colors.white.withOpacity(0.1),
+                                          width: isSelected ? 1.8 : 1.0,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            isSelected ? Icons.check_circle_rounded : Icons.add_circle_outline_rounded,
+                                            color: isSelected ? AppColors.primaryLight : Colors.white.withOpacity(0.2),
+                                            size: 16,
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Text(
+                                            _getIndicatorName(key),
+                                            style: TextStyle(
+                                              color: isSelected ? Colors.white : Colors.white.withOpacity(0.5),
+                                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   );
                                 }).toList(),
                               ),

@@ -45,12 +45,12 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
     'ema': IndicatorSettings(enabled: false, params: {'period1': 10, 'period2': 25, 'period3': 50}),
     'sma': IndicatorSettings(enabled: false, params: {'period': 20}),
     'wma': IndicatorSettings(enabled: false, params: {'period': 20}),
-    'ichimoku': IndicatorSettings(enabled: false),
-    'parabolic': IndicatorSettings(enabled: false),
-    'envelope': IndicatorSettings(enabled: false),
-    'keltner': IndicatorSettings(enabled: false),
-    'supertrend': IndicatorSettings(enabled: false),
-    'gmma': IndicatorSettings(enabled: false),
+    'ichimoku': IndicatorSettings(enabled: false, params: {'tenkan': 9, 'kijun': 26, 'senkouB': 52, 'displacement': 26}),
+    'parabolic': IndicatorSettings(enabled: false, params: {'acceleration': 0.02, 'maxAcceleration': 0.2}),
+    'envelope': IndicatorSettings(enabled: false, params: {'period': 20, 'deviation': 2.5}),
+    'keltner': IndicatorSettings(enabled: false, params: {'period': 20, 'multiplier': 2.0}),
+    'supertrend': IndicatorSettings(enabled: false, params: {'period': 10, 'multiplier': 3.0}),
+    'gmma': IndicatorSettings(enabled: false), // GMMAは期間固定が一般的
     'rsi': IndicatorSettings(enabled: false, params: {'period': 14}),
     'macd': IndicatorSettings(enabled: false, params: {'fast': 12, 'slow': 26, 'signal': 9}),
     'stochastic': IndicatorSettings(enabled: false, params: {'kPeriod': 14, 'dPeriod': 3, 'smooth': 3}),
@@ -61,7 +61,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
     'rci': IndicatorSettings(enabled: false, params: {'period': 9}),
     'momentum': IndicatorSettings(enabled: false, params: {'period': 10}),
     'roc': IndicatorSettings(enabled: false, params: {'period': 12}),
-    'ultimate': IndicatorSettings(enabled: false),
+    'ultimate': IndicatorSettings(enabled: false, params: {'p1': 7, 'p2': 14, 'p3': 28}),
     'trix': IndicatorSettings(enabled: false, params: {'period': 12}),
   };
 
@@ -72,7 +72,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
 
   List<CrossEvent> _crossHistory = [];
   double? _threshold;
-  String _alertTargetIndicator = 'ema'; // デフォルトはEMA
+  List<String> _alertTargetIndicators = ['ema']; // デフォルトはEMA（リスト形式）
   bool _emailNotificationEnabled = false;
   bool _isMaximizedChart = false;
 
@@ -113,6 +113,12 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
         _indicators['ema']!.params['period2'] = _safeInt(settings['ema2Period'], 25);
         _indicators['ema']!.params['period3'] = _safeInt(settings['ema3Period'], 50);
         _emailNotificationEnabled = settings['emailAlertsEnabled'] == true;
+
+        // 監視対象リストの復元
+        if (settings['alertTargetIndicators'] != null) {
+          _alertTargetIndicators = List<String>.from(settings['alertTargetIndicators']);
+        }
+
         _indicators['rsi']!.enabled = settings['rsiEnabled'] == true;
         _indicators['rsi']!.params['period'] = _safeInt(settings['rsiPeriod'], 14);
         _indicators['macd']!.enabled = settings['macdEnabled'] == true;
@@ -174,9 +180,67 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
         setState(() {
           _candles = data;
         });
+
+        // アプリ側での即時クロス検知
+        final localCrosses = CrossDetectionService.detectCrosses(
+          symbol: widget.symbol,
+          interval: _interval,
+          candles: _candles,
+          targetIndicators: _alertTargetIndicators,
+          settings: _indicators,
+        );
+
+        // 1. 新しいクロスを検知した場合、その指標の通知済みフラグをリセットする
+        for (final cross in localCrosses) {
+          final String notificationKey = '${cross.type.name}_${cross.indicatorName}_${cross.interval}';
+          _sentNotifications.remove(notificationKey); // 新しいクロスなので再度監視対象にする
+          
+          // サーバーに最新のクロスを保存（任意）
+          await CrossDetectionService.saveCrossEvent(cross);
+        }
+
+        // 2. 過去のクロス履歴（最新1件ずつ）を取得して閾値チェック
+        final history = await CrossDetectionService.getCrossHistory(widget.symbol);
+        final currentPrice = _candles.last.close;
+
+        if (_threshold != null && _emailNotificationEnabled) {
+          for (final event in history) {
+            // ユーザーが通知対象として選択している指標かチェック
+            if (!_alertTargetIndicators.contains(event.type.name) && 
+                !(event.type == CrossType.ema && _alertTargetIndicators.contains('ema')) &&
+                !(event.type == CrossType.bb && _alertTargetIndicators.contains('bb'))) {
+              continue;
+            }
+
+            final String notificationKey = '${event.type.name}_${event.indicatorName}_${event.interval}';
+            
+            // 既にこのクロスで通知済みの場合はスキップ
+            if (_sentNotifications.contains(notificationKey)) continue;
+
+            // 閾値達成チェック
+            if (CrossDetectionService.checkThresholdReached(event, currentPrice, _threshold!)) {
+              // 閾値達成！メール送信
+              final success = await _chartService.sendThresholdEmail(
+                symbol: widget.symbol,
+                interval: event.interval,
+                crossEvent: event,
+                currentPrice: currentPrice,
+                threshold: _threshold!,
+              );
+
+              if (success) {
+                // 送信成功したら「通知済み」として記録
+                // これにより、次の新しいクロスが発生するまでこの指標では通知されない
+                _sentNotifications.add(notificationKey);
+                debugPrint('Notification sent and re-arm waiting for next cross: $notificationKey');
+              }
+            }
+          }
+        }
+
         _refreshCrossHistory();
       }
-    } catch (e) { debugPrint(e.toString()); }
+    } catch (e) { debugPrint('Error in refreshChartData: $e'); }
   }
 
   Future<void> _loadCrossSettings() async {
@@ -213,6 +277,12 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
   }
 
   Future<void> _syncIndicatorSettingsToServer() async {
+    // 全てのパラメータを抽出
+    final Map<String, dynamic> allParams = {};
+    _indicators.forEach((key, settings) {
+      allParams[key] = settings.params;
+    });
+
     await _chartService.saveIndicatorSettingsToServer(
       symbol: widget.symbol, 
       bbEnabled: _indicators['bb']?.enabled ?? false, 
@@ -223,6 +293,8 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       emaPeriod2: _safeInt(_indicators['ema']?.params['period2'], 25), 
       emaPeriod3: _safeInt(_indicators['ema']?.params['period3'], 50), 
       emailAlertsEnabled: _emailNotificationEnabled,
+      alertTargetIndicators: _alertTargetIndicators,
+      allParams: allParams, // 全ての詳細パラメータを送信
       rsiEnabled: _indicators['rsi']?.enabled ?? false, 
       rsiPeriod: _safeInt(_indicators['rsi']?.params['period'], 14), 
       macdEnabled: _indicators['macd']?.enabled ?? false, 
@@ -623,7 +695,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
           interval: _interval,
           crossHistory: _crossHistory,
           threshold: _threshold,
-          targetIndicator: _alertTargetIndicator,
+          targetIndicators: _alertTargetIndicators,
           indicators: _indicators,
           emailNotificationEnabled: _emailNotificationEnabled,
           currentPrice: _candles.isNotEmpty ? _candles.last.close : null,
@@ -632,8 +704,8 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
             await _chartService.saveThresholdToServer(symbol: widget.symbol, interval: _interval, threshold: v);
             _loadAllIntervalThresholds();
           },
-          onTargetIndicatorChanged: (v) {
-            setState(() => _alertTargetIndicator = v);
+          onTargetIndicatorsChanged: (v) {
+            setState(() => _alertTargetIndicators = v);
             _syncIndicatorSettingsToServer();
           },
           onEmailNotificationChanged: (v) {

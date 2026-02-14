@@ -160,23 +160,34 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
         ),
         title: Text(config.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16)),
         subtitle: Text(config.fullName, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-        trailing: Switch(
-          value: isE,
-          activeTrackColor: config.color.withAlpha(100),
-          activeThumbColor: config.color,
-          onChanged: (v) {
-            setState(() {
-              if (v && isOsc) {
-                for (final c in _osc) {
-                  if (_local.containsKey(c.key)) _local[c.key]!.enabled = false;
-                  if (c.key != config.key) widget.onToggle(c.key, false);
-                }
-              }
-              if (!_local.containsKey(config.key)) _local[config.key] = IndicatorSettings(enabled: v);
-              else _local[config.key]!.enabled = v;
-            });
-            widget.onToggle(config.key, v);
-          },
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // 設定ボタンを追加
+            IconButton(
+              icon: Icon(Icons.settings_outlined, color: isE ? config.color : Colors.white24, size: 20),
+              onPressed: () => _showParamsDialog(config),
+              tooltip: 'パラメータ設定',
+            ),
+            Switch(
+              value: isE,
+              activeTrackColor: config.color.withAlpha(100),
+              activeThumbColor: config.color,
+              onChanged: (v) {
+                setState(() {
+                  if (v && isOsc) {
+                    for (final c in _osc) {
+                      if (_local.containsKey(c.key)) _local[c.key]!.enabled = false;
+                      if (c.key != config.key) widget.onToggle(c.key, false);
+                    }
+                  }
+                  if (!_local.containsKey(config.key)) _local[config.key] = IndicatorSettings(enabled: v);
+                  else _local[config.key]!.enabled = v;
+                });
+                widget.onToggle(config.key, v);
+              },
+            ),
+          ],
         ),
         onTap: () {
           final nv = !isE;
@@ -194,5 +205,102 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
         },
       ),
     );
+  }
+
+  void _showParamsDialog(IndicatorConfig config) {
+    final settings = _local[config.key]!;
+    final Map<String, dynamic> tempParams = Map.from(settings.params);
+    
+    // パラメータがない指標の場合は何もしないかメッセージを出す
+    if (tempParams.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('この指標に調整可能なパラメータはありません')));
+      return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(config.icon, color: config.color, size: 24),
+            const SizedBox(width: 12),
+            Text('${config.name} 設定', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: tempParams.entries.map((e) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Row(
+                  children: [
+                    Expanded(child: Text(_getParamLabel(e.key), style: const TextStyle(color: AppColors.textSecondary))),
+                    const SizedBox(width: 16),
+                    SizedBox(
+                      width: 80,
+                      child: TextField(
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.right,
+                        decoration: InputDecoration(
+                          filled: true,
+                          fillColor: Colors.black26,
+                          isDense: true,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                        ),
+                        controller: TextEditingController(text: e.value.toString()),
+                        onChanged: (v) {
+                          if (e.value is int) {
+                            tempParams[e.key] = int.tryParse(v) ?? e.value;
+                          } else if (e.value is double) {
+                            tempParams[e.key] = double.tryParse(v) ?? e.value;
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('キャンセル', style: TextStyle(color: AppColors.textSecondary))),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                _local[config.key] = settings.copyWith(params: tempParams);
+              });
+              widget.onChanged(config.key, _local[config.key]!);
+              Navigator.pop(context);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: config.color, foregroundColor: Colors.white),
+            child: const Text('保存', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getParamLabel(String key) {
+    switch (key) {
+      case 'period': return '期間';
+      case 'period1': return '短期期間';
+      case 'period2': return '中期期間';
+      case 'period3': return '長期期間';
+      case 'stdDev1': return '標準偏差1';
+      case 'stdDev2': return '標準偏差2';
+      case 'fast': return '短期EMA';
+      case 'slow': return '長期EMA';
+      case 'signal': return 'シグナル';
+      case 'kPeriod': return '%K期間';
+      case 'dPeriod': return '%D期間';
+      case 'smooth': return '平滑化';
+      default: return key;
+    }
   }
 }

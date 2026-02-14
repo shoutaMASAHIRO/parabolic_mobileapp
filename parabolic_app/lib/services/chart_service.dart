@@ -109,7 +109,9 @@ class ChartService {
     required int emaPeriod2,
     required int emaPeriod3,
     required bool emailAlertsEnabled,
-    // オシレーター設定
+    List<String> alertTargetIndicators = const ['ema'],
+    Map<String, dynamic>? allParams, // 全てのパラメータを渡せるように追加
+    // 互換性のための既存引数
     bool rsiEnabled = false,
     int rsiPeriod = 14,
     bool macdEnabled = false,
@@ -133,7 +135,9 @@ class ChartService {
       'ema2Period': emaPeriod2,
       'ema3Period': emaPeriod3,
       'emailAlertsEnabled': emailAlertsEnabled,
-      // オシレーター設定
+      'alertTargetIndicators': alertTargetIndicators,
+      'params': allParams, // 詳細なパラメータをまとめて送信
+      // 既存の個別フィールドも送信
       'rsiEnabled': rsiEnabled,
       'rsiPeriod': rsiPeriod,
       'macdEnabled': macdEnabled,
