@@ -58,10 +58,16 @@ class _CrossSettingsModalState extends State<CrossSettingsModal> {
 
   Future<void> _load() async {
     setState(() => _le = true);
-    final es = await _cs.getEmails(symbol: widget.symbol);
+    // 個別の銘柄用とGLOBAL（トップページ用）の両方のメールアドレスを取得
+    final results = await Future.wait([
+      _cs.getEmails(symbol: widget.symbol),
+      _cs.getEmails(symbol: 'GLOBAL'),
+    ]);
+    
     if (mounted) {
       setState(() {
-        _emails = es;
+        // 重複を除去して統合
+        _emails = {...results[0], ...results[1]}.toList();
         _le = false;
       });
     }

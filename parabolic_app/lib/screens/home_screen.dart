@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
-import '../services/api_service.dart';
-import '../services/stock_service.dart';
-import '../services/chart_service.dart';
 import '../theme/app_colors.dart';
-import '../widgets/asset_list_view.dart';
-import '../widgets/asset_search_sheet.dart';
 import 'login_screen.dart';
 import 'favorites_screen.dart';
+import 'top_screen.dart';
+import 'market_list_screen.dart';
+import 'alert_symbols_screen.dart';
+import '../services/chart_service.dart';
 
 // カテゴリ定義
 enum MarketCategory {
@@ -28,89 +27,10 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
-  final ApiService _api = ApiService();
-  final AssetService _assetService = AssetService();
-  final ChartService _chartService = ChartService();
-  late TabController _tabController;
-
-  List<dynamic> _cryptoData = [];
-  List<dynamic> _forexData = [];
-  List<dynamic> _stockData = [];
-  Set<String> _notifiedSymbols = {};
-  Set<String> _favoriteSymbols = {};
-
-  bool _isLoading = true;
-  String? _error;
+class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: MarketCategory.values.length, vsync: this);
-    _loadData();
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _loadData() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
-    try {
-      final results = await Future.wait([
-        _api.get('/api/crypto/tickers'),
-        _api.get('/api/forex/tickers'),
-        _api.get('/api/stock/tickers'),
-      ]);
-
-      if (results[0].isSuccess && results[1].isSuccess && results[2].isSuccess) {
-        final crypto = results[0].jsonList ?? [];
-        final forex = results[1].jsonList ?? [];
-        final stock = results[2].jsonList ?? [];
-
-        final allSymbols = [
-          ...crypto.map((e) => e is Map ? e['symbol'] as String : e.toString()),
-          ...forex.map((e) => e is Map ? e['symbol'] as String : e.toString()),
-          ...stock.map((e) => e is Map ? e['symbol'] as String : e.toString()),
-        ];
-
-        final notified = <String>{};
-        final favorites = <String>{};
-        await Future.wait(allSymbols.map((symbol) async {
-          final thresholds = await _chartService.getAllThresholdsFromServer(symbol);
-          if (thresholds.isNotEmpty) {
-            bool hasNotif = thresholds.keys.any((k) => k != 'favorite');
-            bool isFav = thresholds['favorite'] == 1.0;
-            if (hasNotif) notified.add(symbol);
-            if (isFav) favorites.add(symbol);
-            print('DEBUG: $symbol - hasNotif: $hasNotif, isFav: $isFav'); // 判定結果を出力
-          }
-        }));
-
-        if (mounted) {
-          setState(() {
-            _cryptoData = crypto;
-            _forexData = forex;
-            _stockData = stock;
-            _notifiedSymbols = notified;
-            _favoriteSymbols = favorites;
-            _isLoading = false;
-          });
-        }
-      } else {
-        if (mounted) setState(() { _error = 'Failed to load data'; _isLoading = false; });
-      }
-    } catch (e) {
-      if (mounted) setState(() { _error = e.toString(); _isLoading = false; });
-    }
-  }
+  MarketCategory? _selectedCategory; // 追加：選択されたカテゴリを保持
+  final ChartService _chartService = ChartService();
 
   Future<void> _handleLogout() async {
     await context.read<AuthProvider>().logout();
@@ -119,90 +39,181 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     }
   }
 
+  Future<void> _showEmailRegistrationDialog() async {
+    // 現在登録されているメールアドレスを取得（GLOBALとして取得）
+    final existingEmails = await _chartService.getEmails(symbol: 'GLOBAL');
+    final controller = TextEditingController(
+      text: existingEmails.isNotEmpty ? existingEmails.first : '',
+    );
+
+    if (!mounted) return;
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('メールアドレス登録', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('アラート通知を受け取るメールアドレスを入力してください。', 
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.emailAddress,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'example@mail.com',
+                hintStyle: const TextStyle(color: AppColors.textTertiary),
+                filled: true,
+                fillColor: AppColors.background,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル', style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+            child: const Text('登録する'),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty && mounted) {
+      final success = await _chartService.registerEmail(email: result, symbol: 'GLOBAL');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success ? 'メールアドレスを登録しました' : '登録に失敗しました'),
+            backgroundColor: success ? AppColors.success : AppColors.error,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.scaffoldBackground,
-      appBar: _currentIndex == 0
-          ? AppBar(
-              title: const Text('Parabolic'),
-              elevation: 0,
-              bottom: TabBar(
-                controller: _tabController,
-                labelColor: AppColors.primary,
-                unselectedLabelColor: AppColors.textSecondary,
-                indicatorColor: AppColors.primary,
-                indicatorWeight: 3,
-                labelStyle: const TextStyle(fontWeight: FontWeight.bold),
-                tabs: MarketCategory.values.map((cat) => Tab(text: cat.label)).toList(),
-              ),
-              actions: [
-                IconButton(icon: const Icon(Icons.notifications_none), onPressed: () {}),
-                PopupMenuButton<String>(
-                  onSelected: (value) { if (value == 'logout') _handleLogout(); },
-                  itemBuilder: (context) => [
-                    const PopupMenuItem(value: 'logout', child: Row(children: [Icon(Icons.logout, size: 20), SizedBox(width: 8), Text('ログアウト')])),
-                  ],
-                ),
-              ],
-            )
-          : null,
+      // AppBarを削除し、各画面のAppBarを表示させる
       body: _buildBody(),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
-        onTap: (index) => setState(() => _currentIndex = index),
+        onTap: (index) {
+          if (index == 3) {
+            _showCategorySelection();
+          } else {
+            setState(() {
+              _currentIndex = index;
+              _selectedCategory = null; // タブ切り替え時に銘柄一覧状態を解除
+            });
+          }
+        },
+        type: BottomNavigationBarType.fixed, // 項目が増えたため固定表示に
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home), label: 'ホーム'),
-          BottomNavigationBarItem(icon: Icon(Icons.show_chart), label: '保有/履歴'),
-          BottomNavigationBarItem(icon: Icon(Icons.account_circle), label: 'アカウント'),
+          BottomNavigationBarItem(icon: Icon(Icons.star), label: '保有/お気に入り'),
+          BottomNavigationBarItem(icon: Icon(Icons.notifications_active), label: '通知銘柄'),
+          BottomNavigationBarItem(icon: Icon(Icons.category_outlined), label: 'カテゴリー'),
         ],
       ),
     );
   }
 
-  Widget _buildBody() {
-    if (_currentIndex == 1) {
-      return const FavoritesScreen();
-    }
-    if (_currentIndex != 0) {
-      return Center(child: Text(_currentIndex == 1 ? '保有/履歴画面 (未実装)' : 'アカウント画面 (未実装)', style: const TextStyle(color: AppColors.textSecondary)));
-    }
-    if (_isLoading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) {
-      return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        const Icon(Icons.error_outline, size: 48, color: AppColors.error), const SizedBox(height: 16),
-        Text(_error!, textAlign: TextAlign.center), const SizedBox(height: 16),
-        ElevatedButton(onPressed: _loadData, child: const Text('再試行')),
-      ]));
-    }
-
-    return TabBarView(
-      controller: _tabController,
-      children: [
-        AssetListView(category: MarketCategory.crypto, data: _cryptoData, notifiedSymbols: _notifiedSymbols, favoriteSymbols: _favoriteSymbols, onRefresh: _loadData, onAddPressed: () => _showAssetSearch(MarketCategory.crypto)),
-        AssetListView(category: MarketCategory.forex, data: _forexData, notifiedSymbols: _notifiedSymbols, favoriteSymbols: _favoriteSymbols, onRefresh: _loadData, onAddPressed: () => _showAssetSearch(MarketCategory.forex)),
-        AssetListView(category: MarketCategory.stock, data: _stockData, notifiedSymbols: _notifiedSymbols, favoriteSymbols: _favoriteSymbols, onRefresh: _loadData, onAddPressed: () => _showAssetSearch(MarketCategory.stock)),
-      ],
+  void _showCategorySelection() {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(color: AppColors.border),
+          ),
+          padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('カテゴリー選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+              const SizedBox(height: 24),
+              ...MarketCategory.values.map((cat) => Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: InkWell(
+                  onTap: () {
+                    Navigator.pop(context);
+                    setState(() {
+                      _currentIndex = 0; // ホームタブを表示
+                      _selectedCategory = cat; // その中の銘柄一覧を表示
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(16),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.05),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.white.withOpacity(0.1)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(cat.icon, color: AppColors.primaryLight),
+                        const SizedBox(width: 16),
+                        Text(cat.label, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                        const Spacer(),
+                        const Icon(Icons.arrow_forward_ios, color: AppColors.textTertiary, size: 14),
+                      ],
+                    ),
+                  ),
+                ),
+              )).toList(),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
-  Future<void> _showAssetSearch(MarketCategory category) async {
-    Set<String> currentSymbols;
-    switch (category) {
-      case MarketCategory.crypto: currentSymbols = _cryptoData.map((e) => e is Map ? e['symbol'] as String : e.toString()).toSet(); break;
-      case MarketCategory.forex: currentSymbols = _forexData.map((e) => e is Map ? e['symbol'] as String : e.toString()).toSet(); break;
-      case MarketCategory.stock: currentSymbols = _stockData.map((e) => e is Map ? e['symbol'] as String : e.toString()).toSet(); break;
+  Widget _buildBody() {
+    if (_selectedCategory != null) {
+      return MarketListScreen(
+        initialCategory: _selectedCategory!,
+        onBack: () => setState(() => _selectedCategory = null),
+      );
     }
 
-    await showDialog(
-      context: context,
-      barrierDismissible: true,
-      builder: (context) => AssetSearchSheet(
-        assetService: _assetService,
-        category: category,
-        currentSymbols: currentSymbols,
-        onAssetAdded: _loadData,
-      ),
-    );
+    switch (_currentIndex) {
+      case 0:
+        return TopScreen(
+          onCategorySelected: (category) {
+            setState(() => _selectedCategory = category);
+          },
+          onEmailSettingsPressed: _showEmailRegistrationDialog,
+        );
+      case 1:
+        return FavoritesScreen(onBack: () => setState(() => _currentIndex = 0));
+      case 2:
+        return AlertSymbolsScreen(onBack: () => setState(() => _currentIndex = 0));
+      case 3:
+        return const Center(child: Text('カテゴリー選択', style: TextStyle(color: AppColors.textSecondary))); // ダイアログで表示
+      default:
+        return const SizedBox.shrink();
+    }
   }
 }

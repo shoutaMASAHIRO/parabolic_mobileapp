@@ -160,7 +160,7 @@ class AssetListView extends StatelessWidget {
                           hasNotification: notifiedSymbols.contains(symbol),
                           isFavorite: favoriteSymbols.contains(symbol),
                           onTap: () async {
-                            await Navigator.of(context).push(
+                            await Navigator.of(context, rootNavigator: true).push(
                               MaterialPageRoute(
                                 builder: (_) => DetailScreen(
                                   symbol: symbol,

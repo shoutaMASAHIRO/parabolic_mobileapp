@@ -11,6 +11,7 @@ import '../services/memo_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/financial_chart.dart';
 import '../widgets/indicator_settings_sheet.dart';
+import 'market_list_screen.dart';
 import 'memo_screen.dart';
 import 'home_screen.dart' show MarketCategory;
 
@@ -335,7 +336,9 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
               onShowIndicatorSettings: _showIndicatorSettings,
               onShowChartTypeSettings: _showChartTypeSettings,
               onMemoPressed: () async {
-                await Navigator.of(context).push(MaterialPageRoute(builder: (_) => MemoScreen(symbol: widget.symbol)));
+                await Navigator.of(context, rootNavigator: true).push(
+                  MaterialPageRoute(builder: (_) => MemoScreen(symbol: widget.symbol)),
+                );
                 _loadMemoCount();
               },
             ),
@@ -632,7 +635,14 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       ),
       child: Row(
         children: [
-          _buildFooterItem(icon: Icons.grid_view, label: 'ホーム', onTap: () => Navigator.of(context).popUntil((r) => r.isFirst)),
+          _buildFooterItem(
+            icon: Icons.grid_view, 
+            label: 'ホーム', 
+            onTap: () {
+              // 最初の画面（HomeScreen）まで戻り、その中のNavigatorもトップに戻す
+              Navigator.of(context).popUntil((route) => route.isFirst);
+            },
+          ),
           _buildFooterItem(
             icon: Icons.stacked_line_chart, 
             label: 'チャート', 
@@ -683,8 +693,10 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
                   padding: const EdgeInsets.only(bottom: 12),
                   child: InkWell(
                     onTap: () {
-                      Navigator.of(context).pop();
-                      Navigator.of(context).pop(cat);
+                      Navigator.of(context).pop(); // モーダルを閉じる
+                      Navigator.of(context, rootNavigator: true).pushReplacement(
+                        MaterialPageRoute(builder: (_) => MarketListScreen(initialCategory: cat)),
+                      );
                     },
                     borderRadius: BorderRadius.circular(12),
                     child: Container(

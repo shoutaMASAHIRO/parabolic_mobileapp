@@ -8,7 +8,8 @@ import 'home_screen.dart' show MarketCategory;
 import 'dart:math';
 
 class FavoritesScreen extends StatefulWidget {
-  const FavoritesScreen({super.key});
+  final VoidCallback? onBack;
+  const FavoritesScreen({super.key, this.onBack});
 
   @override
   State<FavoritesScreen> createState() => _FavoritesScreenState();
@@ -82,6 +83,12 @@ class _FavoritesScreenState extends State<FavoritesScreen> with SingleTickerProv
         backgroundColor: AppColors.scaffoldBackground,
         elevation: 0,
         centerTitle: true,
+        leading: widget.onBack != null 
+            ? IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new, size: 20),
+                onPressed: widget.onBack,
+              )
+            : null,
         bottom: TabBar(
           controller: _tabController,
           labelColor: AppColors.primary,
