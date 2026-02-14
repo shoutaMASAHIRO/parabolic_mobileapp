@@ -21,7 +21,8 @@ enum MarketCategory {
 }
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  final MarketCategory? initialCategory;
+  const HomeScreen({super.key, this.initialCategory});
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -29,8 +30,17 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
-  MarketCategory? _selectedCategory; // 追加：選択されたカテゴリを保持
+  MarketCategory? _selectedCategory;
   final ChartService _chartService = ChartService();
+
+  @override
+  void initState() {
+    super.initState();
+    // 初期カテゴリが指定されていればセットする
+    if (widget.initialCategory != null) {
+      _selectedCategory = widget.initialCategory;
+    }
+  }
 
   Future<void> _handleLogout() async {
     await context.read<AuthProvider>().logout();
@@ -113,25 +123,74 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: AppColors.scaffoldBackground,
       // AppBarを削除し、各画面のAppBarを表示させる
       body: _buildBody(),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          if (index == 3) {
-            _showCategorySelection();
-          } else {
-            setState(() {
-              _currentIndex = index;
-              _selectedCategory = null; // タブ切り替え時に銘柄一覧状態を解除
-            });
-          }
-        },
-        type: BottomNavigationBarType.fixed, // 項目が増えたため固定表示に
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.home), label: 'ホーム'),
-          BottomNavigationBarItem(icon: Icon(Icons.star), label: '保有/お気に入り'),
-          BottomNavigationBarItem(icon: Icon(Icons.notifications_active), label: '通知銘柄'),
-          BottomNavigationBarItem(icon: Icon(Icons.category_outlined), label: 'カテゴリー'),
-        ],
+      bottomNavigationBar: Container(
+        height: 100, 
+        padding: const EdgeInsets.only(bottom: 10),
+        decoration: const BoxDecoration(
+          color: AppColors.surface, 
+          border: Border(top: BorderSide(color: AppColors.divider, width: 1.0))
+        ),
+        child: Row(
+          children: [
+            _buildFooterItem(
+              icon: Icons.home, 
+              label: 'ホーム', 
+              isSelected: _currentIndex == 0,
+              onTap: () => setState(() {
+                _currentIndex = 0;
+                _selectedCategory = null;
+              }),
+            ),
+            _buildFooterItem(
+              icon: Icons.star, 
+              label: '保有/お気に入り', 
+              isSelected: _currentIndex == 1,
+              onTap: () => setState(() {
+                _currentIndex = 1;
+                _selectedCategory = null;
+              }),
+            ),
+            _buildFooterItem(
+              icon: Icons.notifications_active, 
+              label: '通知銘柄', 
+              isSelected: _currentIndex == 2,
+              onTap: () => setState(() {
+                _currentIndex = 2;
+                _selectedCategory = null;
+              }),
+            ),
+            _buildFooterItem(
+              icon: Icons.category_outlined, 
+              label: 'カテゴリー', 
+              isSelected: false, // カテゴリーはダイアログ表示用なので選択状態にはしない
+              onTap: _showCategorySelection,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFooterItem({required IconData icon, required String label, bool isSelected = false, VoidCallback? onTap}) {
+    final color = isSelected ? AppColors.primary : AppColors.textSecondary;
+    return Expanded(
+      child: InkWell(
+        onTap: onTap,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 28),
+            const SizedBox(height: 4),
+            Text(
+              label, 
+              style: TextStyle(
+                color: color, 
+                fontSize: 11, 
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

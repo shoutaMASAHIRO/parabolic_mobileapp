@@ -13,7 +13,7 @@ import '../widgets/financial_chart.dart';
 import '../widgets/indicator_settings_sheet.dart';
 import 'market_list_screen.dart';
 import 'memo_screen.dart';
-import 'home_screen.dart' show MarketCategory;
+import 'home_screen.dart';
 
 class DetailScreen extends StatefulWidget {
   final String symbol;
@@ -636,11 +636,14 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       child: Row(
         children: [
           _buildFooterItem(
-            icon: Icons.grid_view, 
+            icon: Icons.home, 
             label: 'ホーム', 
             onTap: () {
-              // 最初の画面（HomeScreen）まで戻り、その中のNavigatorもトップに戻す
-              Navigator.of(context).popUntil((route) => route.isFirst);
+              // 全ての履歴を削除して HomeScreen に戻る
+              Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => HomeScreen()),
+                (route) => false,
+              );
             },
           ),
           _buildFooterItem(
@@ -694,8 +697,11 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
                   child: InkWell(
                     onTap: () {
                       Navigator.of(context).pop(); // モーダルを閉じる
-                      Navigator.of(context, rootNavigator: true).pushReplacement(
-                        MaterialPageRoute(builder: (_) => MarketListScreen(initialCategory: cat)),
+                      // HomeScreenに戻りつつ、新しいカテゴリを指定する
+                      // ここでは pushAndRemoveUntil を使い、初期カテゴリを渡せるようにします
+                      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+                        MaterialPageRoute(builder: (_) => HomeScreen(initialCategory: cat)),
+                        (route) => false,
                       );
                     },
                     borderRadius: BorderRadius.circular(12),
