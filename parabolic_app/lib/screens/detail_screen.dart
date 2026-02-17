@@ -532,25 +532,70 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
     showDialog(
       context: context,
       builder: (context) => Dialog(
-        backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(16, 24, 16, 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('チャートタイプ選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.textPrimary)),
-              const SizedBox(height: 32),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceAround,
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  _buildChartTypeOption(type: ChartType.line, label: '折れ線', icon: Icons.show_chart),
-                  _buildChartTypeOption(type: ChartType.candlestick, label: 'ローソク足', icon: Icons.candlestick_chart),
-                  _buildChartTypeOption(type: ChartType.heikinAshi, label: '平均足', icon: Icons.bar_chart),
+                  Container(
+                    width: 40, height: 4,
+                    margin: const EdgeInsets.only(bottom: 24),
+                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  ),
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.bar_chart, color: AppColors.primaryLight, size: 22),
+                      SizedBox(width: 8),
+                      Text('チャートタイプ選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final itemWidth = (constraints.maxWidth - 12) / 2;
+                      return Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          _buildChartTypeOption(type: ChartType.heikinAshi, label: '平均足', icon: Icons.bar_chart, width: itemWidth),
+                          _buildChartTypeOption(type: ChartType.candlestick, label: 'ローソク足', icon: Icons.candlestick_chart, width: itemWidth),
+                          _buildChartTypeOption(type: ChartType.dot, label: 'ドット', icon: Icons.scatter_plot, width: itemWidth),
+                          _buildChartTypeOption(type: ChartType.line, label: '折れ線', icon: Icons.show_chart, width: itemWidth),
+                        ],
+                      );
+                    },
+                  ),
                 ],
               ),
-            ],
-          ),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(20),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white54, size: 20),
+                ),
+                tooltip: '閉じる',
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -562,36 +607,57 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       builder: (context) => Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-        child: Container(
-          decoration: const BoxDecoration(
-            color: AppColors.surface,
-            borderRadius: BorderRadius.all(Radius.circular(20)),
-          ),
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40, height: 4,
-                margin: const EdgeInsets.only(bottom: 24),
-                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              decoration: const BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.all(Radius.circular(20)),
               ),
-              const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 40),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.access_time, color: AppColors.primaryLight, size: 20),
-                  SizedBox(width: 8),
-                  Text('時間足選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                  Container(
+                    width: 40, height: 4,
+                    margin: const EdgeInsets.only(bottom: 24),
+                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                  ),
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.access_time, color: AppColors.primaryLight, size: 20),
+                      SizedBox(width: 8),
+                      Text('時間足選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                    ],
+                  ),
+                  const SizedBox(height: 32),
+                  Wrap(
+                    spacing: 12, runSpacing: 16,
+                    alignment: WrapAlignment.center,
+                    children: _intervals.map((i) => _buildIntervalOption(i)).toList(),
+                  ),
                 ],
               ),
-              const SizedBox(height: 32),
-              Wrap(
-                spacing: 12, runSpacing: 16,
-                alignment: WrapAlignment.center,
-                children: _intervals.map((i) => _buildIntervalOption(i)).toList(),
+            ),
+            Positioned(
+              top: 8,
+              right: 8,
+              child: IconButton(
+                onPressed: () => Navigator.pop(context),
+                icon: Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(20),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.close, color: Colors.white54, size: 20),
+                ),
+                tooltip: '閉じる',
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -639,19 +705,47 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildChartTypeOption({required ChartType type, required String label, required IconData icon}) {
+  Widget _buildChartTypeOption({required ChartType type, required String label, required IconData icon, required double width}) {
     final bool isSelected = _chartType == type;
     return GestureDetector(
       onTap: () { setState(() { _chartType = type; }); Navigator.pop(context); },
-      child: Column(children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(color: isSelected ? AppColors.primary.withOpacity(0.2) : Colors.transparent, borderRadius: BorderRadius.circular(16), border: Border.all(color: isSelected ? AppColors.primary : AppColors.border, width: 2)),
-          child: Icon(icon, size: 32, color: isSelected ? AppColors.primary : AppColors.textSecondary),
+      child: Container(
+        width: width,
+        padding: const EdgeInsets.symmetric(vertical: 20),
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primary.withAlpha(40) : Colors.white.withAlpha(5),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected ? AppColors.primaryLight : Colors.white.withAlpha(10),
+            width: isSelected ? 2.0 : 1.0,
+          ),
+          boxShadow: isSelected ? [
+            BoxShadow(
+              color: AppColors.primary.withOpacity(0.2),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            )
+          ] : null,
         ),
-        const SizedBox(height: 8),
-        Text(label, style: TextStyle(fontSize: 12, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? AppColors.primary : AppColors.textSecondary)),
-      ]),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              size: 36,
+              color: isSelected ? AppColors.primaryLight : AppColors.textSecondary,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                color: isSelected ? Colors.white : AppColors.textSecondary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

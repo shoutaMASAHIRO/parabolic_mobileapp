@@ -189,11 +189,14 @@ class CandlestickPainter extends CustomPainter {
 
     // ローソク足の描画
     for (int i = indicatorStartIndex; i < candles.length; i++) {
-      final c = candles[i]; final x = i * cw + cw / 2;
+      final c = candles[i]; 
+      // ピクセルグリッドに合わせるためX座標を丸める
+      final double x = (i * cw + cw / 2).roundToDouble();
       final hy = size.height - ((c.high - minY) / pr * size.height); final ly = size.height - ((c.low - minY) / pr * size.height);
       final oy = size.height - ((c.open - minY) / pr * size.height); final cy = size.height - ((c.close - minY) / pr * size.height);
       final pos = c.close >= c.open; final color = pos ? AppColors.rise : AppColors.fall;
-      canvas.drawLine(Offset(x, hy), Offset(x, ly), Paint()..color = color.withOpacity(0.8)..strokeWidth = 1);
+      // ひげ（高値・安値）を白色で均一な太さで描画（透過度で細さを表現）
+      canvas.drawLine(Offset(x, hy), Offset(x, ly), Paint()..color = Colors.white.withOpacity(0.6)..strokeWidth = 1.0);
       final bt = pos ? cy : oy; final bb = pos ? oy : cy;
       canvas.drawRect(Rect.fromCenter(center: Offset(x, (bt + bb) / 2), width: (cw * 0.8).clamp(1.0, 20.0), height: (bb - bt).abs().clamp(1.0, size.height)), Paint()..color = color..style = PaintingStyle.fill);
     }

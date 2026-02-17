@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-enum ChartType { line, candlestick, heikinAshi }
+enum ChartType { line, candlestick, heikinAshi, dot }
 
 class IndicatorSettings {
   bool enabled;

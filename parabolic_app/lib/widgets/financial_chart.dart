@@ -159,10 +159,11 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
       case ChartType.line: return _buildLineChart(widget.candles);
       case ChartType.candlestick: return _buildCandlestickChart(widget.candles);
       case ChartType.heikinAshi: return _buildCandlestickChart(Candle.toHeikinAshi(widget.candles));
+      case ChartType.dot: return _buildLineChart(widget.candles, isDot: true);
     }
   }
 
-  Widget _buildLineChart(List<Candle> candles) {
+  Widget _buildLineChart(List<Candle> candles, {bool isDot = false}) {
     int maxP = 0; 
     if (_showBB) maxP = math.max(maxP, _bbPeriod); 
     if (_showEMA) maxP = math.max(maxP, math.max(_emaPeriod1, math.max(_emaPeriod2, _emaPeriod3)));
@@ -189,8 +190,27 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
     final prices = candles.map((c) => c.close).toList();
     final spots = display.asMap().entries.map((e) => FlSpot(e.key.toDouble(), e.value.close)).toList();
     final isPos = display.last.close >= display.first.close;
-    final color = isPos ? AppColors.rise : AppColors.fall;
-    final lineBars = [LineChartBarData(spots: spots, isCurved: true, curveSmoothness: 0.2, color: color, barWidth: 2, isStrokeCapRound: true, dotData: const FlDotData(show: false), belowBarData: BarAreaData(show: true, color: color.withAlpha(30)))];
+    final color = isDot ? Colors.yellowAccent : (isPos ? AppColors.rise : AppColors.fall);
+    
+    final lineBars = [
+      LineChartBarData(
+        spots: spots,
+        isCurved: !isDot,
+        curveSmoothness: 0.2,
+        color: color,
+        barWidth: isDot ? 0 : 2,
+        isStrokeCapRound: true,
+        dotData: FlDotData(
+          show: isDot,
+          getDotPainter: (spot, percent, barData, index) => FlDotCirclePainter(
+            radius: 3,
+            color: color,
+            strokeWidth: 0,
+          ),
+        ),
+        belowBarData: BarAreaData(show: !isDot, color: color.withAlpha(30)),
+      )
+    ];
 
     if (_showBB) {
       final bb = TechnicalIndicators.calculateBollingerBands(prices, period: _bbPeriod, stdDev1: _bbStdDev1, stdDev2: _bbStdDev2);
