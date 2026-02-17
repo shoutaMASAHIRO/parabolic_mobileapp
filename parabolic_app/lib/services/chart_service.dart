@@ -212,6 +212,9 @@ $displaySymbolの${crossEvent.displayName}クロスが閾値に達しました�
 閾値: $currency${threshold.toStringAsFixed(2)}
 
 クロス発生時刻: ${crossEvent.timestamp.toLocal()}
+
+---
+Sent from parabolic_mobileapp
 ''';
 
     final response = await _api.post('/api/send-threshold-email', {

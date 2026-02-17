@@ -123,6 +123,9 @@ ${e.symbol} においてテクニカル指標のシグナルを検知しまし�
 
 ${e.displayName} のラインを価格が【$directionText】しました。
 設定された閾値（${widget.threshold?.toStringAsFixed(2) ?? '未設定'}）に基づき、この価格から指定以上の変動があった場合に再度メール通知が行われます。
+
+---
+Sent from parabolic_mobileapp
 ''';
 
     await showDialog(

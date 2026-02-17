@@ -284,7 +284,7 @@ class YAxisLabelPainter extends CustomPainter {
     if (fixedLevels != null) {
       valuesToDraw.addAll(fixedLevels!.where((v) => v >= minY && v <= maxY));
     } else {
-      double s = range / 10;
+      double s = range / 6; // 目盛りの数を少し増やす（分割数を小さくする）
       if (s == 0) s = 1.0;
       double e = (math.log(s) / math.ln10).floorToDouble();
       double m = math.pow(10, e).toDouble();
@@ -301,7 +301,15 @@ class YAxisLabelPainter extends CustomPainter {
     for (final v in valuesToDraw) {
       final double y = size.height - ((v - minY) / range * size.height);
       if (y >= 0 && y <= size.height) {
-        String label = v.toStringAsFixed(v < 0.1 ? 4 : (v < 1 ? 3 : (v < 100 ? 2 : 0)));
+        // オシレーターなどの小さな値でも精度を保つ
+        String label;
+        double absV = v.abs();
+        if (absV == 0) label = "0";
+        else if (absV < 0.01) label = v.toStringAsFixed(4);
+        else if (absV < 1) label = v.toStringAsFixed(3);
+        else if (absV < 100) label = v.toStringAsFixed(2);
+        else label = v.toStringAsFixed(0);
+
         final tp = TextPainter(
           text: TextSpan(text: label, style: ts),
           textDirection: ui.TextDirection.ltr,
@@ -447,6 +455,19 @@ class OscillatorPainter extends CustomPainter {
     this.touchedDateTime,
     this.candles,
   });
+
+  double _calculatePriceStep(double r) {
+    if (r <= 0) return 1.0;
+    double s = r / 6; // オシレーターは領域が狭いため分割数を少なめにする
+    double e = (math.log(s) / math.ln10).floorToDouble(); 
+    double m = math.pow(10, e).toDouble(); 
+    double rs = s / m;
+    if (rs < 1.5) return 1.0 * m; 
+    if (rs < 3.0) return 2.0 * m; 
+    if (rs < 7.0) return 5.0 * m; 
+    return 10.0 * m;
+  }
+
   @override
   void paint(Canvas canvas, ui.Size size) {
     if (values.isEmpty) return; final double cw = size.width / values.length; final double range = maxY - minY; if (range <= 0) return;
@@ -460,10 +481,23 @@ class OscillatorPainter extends CustomPainter {
     }
 
     final levels = <double>[];
-    if (oscillatorType == 'rsi') levels.addAll([70, 50, 30]);
-    else if (oscillatorType == 'macd') levels.add(0);
-    else if (oscillatorType == 'stochastic') levels.addAll([80, 50, 20]);
-    else if (oscillatorType == 'cci') levels.addAll([100, 0, -100]);
+    if (oscillatorType == 'rsi') {
+      levels.addAll([70, 50, 30]);
+    } else if (oscillatorType == 'macd') {
+      levels.add(0);
+    } else if (oscillatorType == 'stochastic') {
+      levels.addAll([80, 50, 20]);
+    } else if (oscillatorType == 'cci') {
+      levels.addAll([100, 0, -100]);
+    } else {
+      // 乖離率やDMIなど、範囲が動的なオシレーター用の目盛り計算
+      double ps = _calculatePriceStep(range);
+      double fl = (minY / ps).ceil() * ps;
+      for (double v = fl; v <= maxY; v += ps) {
+        levels.add(v);
+      }
+    }
+
     for (final l in levels) {
       final y = size.height - ((l - minY) / range * size.height);
       if (y >= 0 && y <= size.height) {
