@@ -596,7 +596,12 @@ class _FinancialChartState extends State<FinancialChart> with SingleTickerProvid
       child: Column(
         children: [
           const SizedBox(height: 8),
-          _buildToolbarButton(icon: Icons.tune, onPressed: widget.onShowIndicatorSettings, isActive: _activeIndicatorCount > 0),
+          _buildToolbarButton(
+            icon: Icons.tune,
+            onPressed: widget.onShowIndicatorSettings,
+            isActive: _activeIndicatorCount > 0,
+            badgeCount: _activeIndicatorCount,
+          ),
           _buildToolbarButton(icon: Icons.bar_chart, onPressed: widget.onShowChartTypeSettings),
           _buildToolbarButton(
             icon: Icons.note_alt_outlined,

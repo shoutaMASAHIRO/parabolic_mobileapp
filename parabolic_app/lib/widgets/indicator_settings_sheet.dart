@@ -20,6 +20,8 @@ class IndicatorSettingsSheet extends StatefulWidget {
 
 class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
   late Map<String, IndicatorSettings> _local;
+  bool _trendExpanded = false;
+  bool _oscExpanded = false;
 
   @override
   void initState() {
@@ -65,77 +67,166 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.all(Radius.circular(20)),
-      ),
-      constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85, maxWidth: 500),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 40, height: 4,
-            margin: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        Container(
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.all(Radius.circular(20)),
           ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 16, 8),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('インジケーター設定', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
-                TextButton(
-                  onPressed: () => setState(() {
-                    for (final k in _local.keys) {
-                      _local[k]!.enabled = false;
-                      widget.onToggle(k, false);
-                    }
-                  }),
-                  child: const Text('すべてオフ', style: TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: Colors.white10),
-          Flexible(
-            child: SingleChildScrollView(
-              child: SafeArea(
-                top: false,
-                child: Column(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85, maxWidth: 500),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    _buildSectionHeader('トレンド系', 'チャート上に表示', Icons.show_chart, AppColors.primary),
-                    ..._trend.map((c) => _buildIndicatorTile(c)),
-                    const SizedBox(height: 16),
-                    _buildSectionHeader('オシレーター系', 'サブチャートに表示', Icons.ssid_chart, AppColors.rsiLine),
-                    ..._osc.map((c) => _buildIndicatorTile(c)),
-                    const SizedBox(height: 40),
+                    const Text('インジケーター設定', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                    Row(
+                      children: [
+                        TextButton(
+                          onPressed: () {
+                            showDialog(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                backgroundColor: AppColors.surface,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                                title: const Text('設定のリセット', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                                content: const Text('すべてのインジケーターをオフにしますか？', style: TextStyle(color: AppColors.textSecondary)),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('キャンセル', style: TextStyle(color: AppColors.textSecondary)),
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () {
+                                      setState(() {
+                                        for (final k in _local.keys) {
+                                          _local[k]!.enabled = false;
+                                          widget.onToggle(k, false);
+                                        }
+                                      });
+                                      Navigator.pop(context);
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppColors.error,
+                                      foregroundColor: Colors.white,
+                                    ),
+                                    child: const Text('すべてオフにする', style: TextStyle(fontWeight: FontWeight.bold)),
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                          child: const Text('すべてオフ', style: TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold)),
+                        ),
+                        const SizedBox(width: 40), // ×ボタンのためのスペースを確保
+                      ],
+                    ),
                   ],
                 ),
               ),
-            ),
+              const Divider(height: 1, color: Colors.white10),
+              Flexible(
+                child: SingleChildScrollView(
+                  child: SafeArea(
+                    top: false,
+                    child: Column(
+                      children: [
+                        _buildSectionHeader(
+                          'トレンド系',
+                          'チャート上に表示',
+                          Icons.show_chart,
+                          AppColors.primary,
+                          _trendExpanded,
+                          () => setState(() => _trendExpanded = !_trendExpanded),
+                        ),
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 400),
+                          curve: Curves.easeInOutCubic,
+                          child: _trendExpanded
+                              ? Column(children: _trend.map((c) => _buildIndicatorTile(c)).toList())
+                              : const SizedBox(width: double.infinity, height: 0),
+                        ),
+                        const SizedBox(height: 16),
+                        _buildSectionHeader(
+                          'オシレーター系',
+                          'サブチャートに表示',
+                          Icons.ssid_chart,
+                          AppColors.rsiLine,
+                          _oscExpanded,
+                          () => setState(() => _oscExpanded = !_oscExpanded),
+                        ),
+                        AnimatedSize(
+                          duration: const Duration(milliseconds: 400),
+                          curve: Curves.easeInOutCubic,
+                          child: _oscExpanded
+                              ? Column(children: _osc.map((c) => _buildIndicatorTile(c)).toList())
+                              : const SizedBox(width: double.infinity, height: 0),
+                        ),
+                        const SizedBox(height: 40),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+        Positioned(
+          top: 8,
+          right: 8,
+          child: IconButton(
+            onPressed: () => Navigator.pop(context),
+            icon: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: Colors.white.withAlpha(20),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.close, color: Colors.white54, size: 20),
+            ),
+            tooltip: '閉じる',
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _buildSectionHeader(String t, String s, IconData i, Color c) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-    decoration: BoxDecoration(color: c.withAlpha(20)),
-    child: Row(
-      children: [
-        Icon(i, color: c, size: 22),
-        const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(t, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: c)),
-            Text(s, style: TextStyle(fontSize: 11, color: c.withAlpha(180))),
-          ],
-        )
-      ],
+  Widget _buildSectionHeader(String t, String s, IconData i, Color c, bool isExpanded, VoidCallback onTap) => InkWell(
+    onTap: onTap,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(color: c.withAlpha(20)),
+      child: Row(
+        children: [
+          Icon(i, color: c, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(t, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: c)),
+                Text(s, style: TextStyle(fontSize: 11, color: c.withAlpha(180))),
+              ],
+            ),
+          ),
+          Icon(
+            isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
+            color: c.withAlpha(180),
+            size: 20,
+          ),
+        ],
+      ),
     ),
   );
 
