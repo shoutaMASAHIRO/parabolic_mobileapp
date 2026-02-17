@@ -26,6 +26,7 @@ class _MarketListScreenState extends State<MarketListScreen> with SingleTickerPr
   Set<String> _notifiedSymbols = {};
   Set<String> _favoriteSymbols = {};
   bool _isLoading = true;
+  bool _isSearchVisible = false;
 
   @override
   void initState() {
@@ -128,35 +129,94 @@ class _MarketListScreenState extends State<MarketListScreen> with SingleTickerPr
           }).toList(),
         ),
       ),
-      body: _isLoading 
-          ? const Center(child: CircularProgressIndicator())
-          : TabBarView(
-              controller: _tabController,
-              children: [
-                AssetListView(category: MarketCategory.crypto, data: _cryptoData, notifiedSymbols: _notifiedSymbols, favoriteSymbols: _favoriteSymbols, onRefresh: _loadData, onAddPressed: () => _showAssetSearch(MarketCategory.crypto)),
-                AssetListView(category: MarketCategory.forex, data: _forexData, notifiedSymbols: _notifiedSymbols, favoriteSymbols: _favoriteSymbols, onRefresh: _loadData, onAddPressed: () => _showAssetSearch(MarketCategory.forex)),
-                AssetListView(category: MarketCategory.stock, data: _stockData, notifiedSymbols: _notifiedSymbols, favoriteSymbols: _favoriteSymbols, onRefresh: _loadData, onAddPressed: () => _showAssetSearch(MarketCategory.stock)),
-              ],
+      body: Stack(
+        children: [
+          _isLoading 
+              ? const Center(child: CircularProgressIndicator())
+              : TabBarView(
+                  controller: _tabController,
+                  children: [
+                    AssetListView(category: MarketCategory.crypto, data: _cryptoData, notifiedSymbols: _notifiedSymbols, favoriteSymbols: _favoriteSymbols, onRefresh: _loadData, onAddPressed: () {}, showAddButton: false),
+                    AssetListView(category: MarketCategory.forex, data: _forexData, notifiedSymbols: _notifiedSymbols, favoriteSymbols: _favoriteSymbols, onRefresh: _loadData, onAddPressed: () {}, showAddButton: false),
+                    AssetListView(category: MarketCategory.stock, data: _stockData, notifiedSymbols: _notifiedSymbols, favoriteSymbols: _favoriteSymbols, onRefresh: _loadData, onAddPressed: () {}, showAddButton: false),
+                  ],
+                ),
+          
+          // Slide-out Search Panel (Centered)
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 350),
+            curve: Curves.easeOutBack,
+            left: MediaQuery.of(context).size.width * 0.075,
+            // Use a much larger negative value to ensure it's completely off-screen
+            bottom: _isSearchVisible 
+                ? (MediaQuery.of(context).viewInsets.bottom > 0 ? MediaQuery.of(context).viewInsets.bottom + 10 : 80) 
+                : -1000,
+            child: AnimatedOpacity(
+              duration: const Duration(milliseconds: 200),
+              opacity: _isSearchVisible ? 1.0 : 0.0,
+              child: IgnorePointer(
+                ignoring: !_isSearchVisible,
+                child: SizedBox(
+                  width: MediaQuery.of(context).size.width * 0.85,
+                  child: AssetSearchSheet(
+                    assetService: _assetService,
+                    category: MarketCategory.values[_tabController.index],
+                    currentSymbols: _getCurrentSymbols(MarketCategory.values[_tabController.index]),
+                    onAssetAdded: _loadData,
+                    onClose: () => setState(() => _isSearchVisible = false),
+                  ),
+                ),
+              ),
             ),
+          ),
+
+          // Floating Search Button in Bottom Left
+          Positioned(
+            left: 16,
+            bottom: 16,
+            child: FloatingActionButton(
+              heroTag: 'search_fab',
+              backgroundColor: _isSearchVisible ? AppColors.error : AppColors.primary,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(_isSearchVisible ? 12 : 28),
+              ),
+              onPressed: () {
+                setState(() {
+                  _isSearchVisible = !_isSearchVisible;
+                });
+              },
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                transitionBuilder: (Widget child, Animation<double> animation) {
+                  return RotationTransition(
+                    turns: Tween<double>(begin: 0.75, end: 1.0).animate(animation),
+                    child: ScaleTransition(scale: animation, child: child),
+                  );
+                },
+                child: Icon(
+                  _isSearchVisible ? Icons.close : Icons.search,
+                  key: ValueKey<bool>(_isSearchVisible),
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Future<void> _showAssetSearch(MarketCategory category) async {
-    Set<String> currentSymbols;
+  Set<String> _getCurrentSymbols(MarketCategory category) {
     switch (category) {
-      case MarketCategory.crypto: currentSymbols = _cryptoData.map((e) => e['symbol'] as String).toSet(); break;
-      case MarketCategory.forex: currentSymbols = _forexData.map((e) => e['symbol'] as String).toSet(); break;
-      case MarketCategory.stock: currentSymbols = _stockData.map((e) => e['symbol'] as String).toSet(); break;
+      case MarketCategory.crypto: return _cryptoData.map((e) => e['symbol'] as String).toSet();
+      case MarketCategory.forex: return _forexData.map((e) => e['symbol'] as String).toSet();
+      case MarketCategory.stock: return _stockData.map((e) => e['symbol'] as String).toSet();
     }
+  }
 
-    await showDialog(
-      context: context,
-      builder: (context) => AssetSearchSheet(
-        assetService: _assetService,
-        category: category,
-        currentSymbols: currentSymbols,
-        onAssetAdded: _loadData,
-      ),
-    );
+  Future<void> _showAssetSearch(MarketCategory category) async {
+    setState(() {
+      _isSearchVisible = true;
+    });
   }
 }
