@@ -129,41 +129,62 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
                 child: SingleChildScrollView(
                   child: SafeArea(
                     top: false,
-                    child: Column(
-                      children: [
-                        _buildSectionHeader(
-                          'トレンド系',
-                          'チャート上に表示',
-                          Icons.show_chart,
-                          AppColors.primary,
-                          _trendExpanded,
-                          () => setState(() => _trendExpanded = !_trendExpanded),
-                        ),
-                        AnimatedSize(
-                          duration: const Duration(milliseconds: 400),
-                          curve: Curves.easeInOutCubic,
-                          child: _trendExpanded
-                              ? Column(children: _trend.map((c) => _buildIndicatorTile(c)).toList())
-                              : const SizedBox(width: double.infinity, height: 0),
-                        ),
-                        const SizedBox(height: 16),
-                        _buildSectionHeader(
-                          'オシレーター系',
-                          'サブチャートに表示',
-                          Icons.ssid_chart,
-                          AppColors.rsiLine,
-                          _oscExpanded,
-                          () => setState(() => _oscExpanded = !_oscExpanded),
-                        ),
-                        AnimatedSize(
-                          duration: const Duration(milliseconds: 400),
-                          curve: Curves.easeInOutCubic,
-                          child: _oscExpanded
-                              ? Column(children: _osc.map((c) => _buildIndicatorTile(c)).toList())
-                              : const SizedBox(width: double.infinity, height: 0),
-                        ),
-                        const SizedBox(height: 40),
-                      ],
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final itemWidth = (constraints.maxWidth - 36) / 2;
+                        return Column(
+                          children: [
+                            const SizedBox(height: 21),
+                            _buildSectionHeader(
+                              'トレンド系',
+                              'チャート上に表示',
+                              Icons.show_chart,
+                              AppColors.primary,
+                              _trendExpanded,
+                              () => setState(() => _trendExpanded = !_trendExpanded),
+                              _trend.where((c) => _local[c.key]?.enabled ?? false).length,
+                            ),
+                            AnimatedSize(
+                              duration: const Duration(milliseconds: 400),
+                              curve: Curves.easeInOutCubic,
+                              child: _trendExpanded
+                                  ? Padding(
+                                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                                      child: Wrap(
+                                        spacing: 12,
+                                        runSpacing: 12,
+                                        children: _trend.map((c) => _buildIndicatorTile(c, itemWidth)).toList(),
+                                      ),
+                                    )
+                                  : const SizedBox(width: double.infinity, height: 0),
+                            ),
+                            _buildSectionHeader(
+                              'オシレーター系',
+                              'サブチャートに表示',
+                              Icons.ssid_chart,
+                              AppColors.rsiLine,
+                              _oscExpanded,
+                              () => setState(() => _oscExpanded = !_oscExpanded),
+                              _osc.where((c) => _local[c.key]?.enabled ?? false).length,
+                            ),
+                            AnimatedSize(
+                              duration: const Duration(milliseconds: 400),
+                              curve: Curves.easeInOutCubic,
+                              child: _oscExpanded
+                                  ? Padding(
+                                      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                                      child: Wrap(
+                                        spacing: 12,
+                                        runSpacing: 12,
+                                        children: _osc.map((c) => _buildIndicatorTile(c, itemWidth)).toList(),
+                                      ),
+                                    )
+                                  : const SizedBox(width: double.infinity, height: 0),
+                            ),
+                            const SizedBox(height: 24),
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -298,99 +319,152 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
     ),
   );
 
-  Widget _buildSectionHeader(String t, String s, IconData i, Color c, bool isExpanded, VoidCallback onTap) => InkWell(
-    onTap: onTap,
-    child: Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: BoxDecoration(color: c.withAlpha(20)),
-      child: Row(
-        children: [
-          Icon(i, color: c, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(t, style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: c)),
-                Text(s, style: TextStyle(fontSize: 11, color: c.withAlpha(180))),
-              ],
+  Widget _buildSectionHeader(String t, String s, IconData i, Color c, bool isExpanded, VoidCallback onTap, int activeCount) => Container(
+    margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    child: InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: isExpanded ? c.withAlpha(45) : c.withAlpha(15),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isExpanded ? c.withAlpha(100) : c.withAlpha(40),
+            width: 1.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 4, height: 26,
+              decoration: BoxDecoration(
+                color: c,
+                borderRadius: BorderRadius.circular(2),
+                boxShadow: [
+                  BoxShadow(color: c.withAlpha(100), blurRadius: 4),
+                ],
+              ),
             ),
-          ),
-          Icon(
-            isExpanded ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down,
-            color: c.withAlpha(180),
-            size: 20,
-          ),
-        ],
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(t, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 0.5)),
+                      if (activeCount > 0) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: c,
+                            borderRadius: BorderRadius.circular(8),
+                            boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 2)],
+                          ),
+                          child: Text(activeCount.toString(), style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900)),
+                        ),
+                      ],
+                    ],
+                  ),
+                  Text(s, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isExpanded ? Colors.white70 : c.withAlpha(200))),
+                ],
+              ),
+            ),
+            Icon(
+              isExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded,
+              color: c,
+              size: 26,
+            ),
+          ],
+        ),
       ),
     ),
   );
 
-  Widget _buildIndicatorTile(IndicatorConfig config) {
+  Widget _buildIndicatorTile(IndicatorConfig config, double width) {
     final s = _local[config.key];
     final isE = s?.enabled ?? false;
     final isOsc = _osc.any((c) => c.key == config.key);
     
-    return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      decoration: BoxDecoration(
-        color: isE ? config.color.withAlpha(15) : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isE ? config.color.withAlpha(50) : Colors.transparent),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: Container(
-          width: 44, height: 44,
-          decoration: BoxDecoration(color: config.color.withAlpha(30), borderRadius: BorderRadius.circular(10)),
-          child: Icon(config.icon, color: config.color, size: 24),
-        ),
-        title: Text(config.name, style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 16)),
-        subtitle: Text(config.fullName, style: const TextStyle(color: AppColors.textSecondary, fontSize: 12)),
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 設定ボタンを追加
-            IconButton(
-              icon: Icon(Icons.settings_outlined, color: isE ? config.color : Colors.white24, size: 20),
+    return GestureDetector(
+      onTap: () {
+        final nv = !isE;
+        setState(() {
+          if (nv && isOsc) {
+            for (final c in _osc) {
+              if (_local.containsKey(c.key)) _local[c.key]!.enabled = false;
+              if (c.key != config.key) widget.onToggle(c.key, false);
+            }
+          }
+          if (!_local.containsKey(config.key)) _local[config.key] = IndicatorSettings(enabled: nv);
+          else _local[config.key]!.enabled = nv;
+        });
+        widget.onToggle(config.key, nv);
+      },
+      child: Stack(
+        children: [
+          Container(
+            width: width,
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            decoration: BoxDecoration(
+              color: isE ? config.color.withAlpha(40) : Colors.white.withAlpha(5),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: isE ? config.color : Colors.white.withAlpha(10),
+                width: isE ? 2.0 : 1.0,
+              ),
+              boxShadow: isE ? [
+                BoxShadow(
+                  color: config.color.withOpacity(0.2),
+                  blurRadius: 10,
+                  offset: const Offset(0, 4),
+                )
+              ] : null,
+            ),
+            child: Column(
+              children: [
+                Icon(
+                  config.icon,
+                  size: 32,
+                  color: isE ? Colors.white : config.color.withOpacity(0.7),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  config.name,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: isE ? FontWeight.bold : FontWeight.normal,
+                    color: isE ? Colors.white : AppColors.textSecondary,
+                  ),
+                ),
+                Text(
+                  config.fullName,
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: isE ? Colors.white70 : AppColors.textSecondary.withOpacity(0.5),
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+          // 設定ボタン（右上に小さく配置）
+          Positioned(
+            top: 4,
+            right: 4,
+            child: IconButton(
+              icon: Icon(Icons.tune_rounded, size: 18, color: isE ? Colors.white : Colors.white24),
               onPressed: () => _showParamsDialog(config),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               tooltip: 'パラメータ設定',
             ),
-            Switch(
-              value: isE,
-              activeTrackColor: config.color.withAlpha(100),
-              activeThumbColor: config.color,
-              onChanged: (v) {
-                setState(() {
-                  if (v && isOsc) {
-                    for (final c in _osc) {
-                      if (_local.containsKey(c.key)) _local[c.key]!.enabled = false;
-                      if (c.key != config.key) widget.onToggle(c.key, false);
-                    }
-                  }
-                  if (!_local.containsKey(config.key)) _local[config.key] = IndicatorSettings(enabled: v);
-                  else _local[config.key]!.enabled = v;
-                });
-                widget.onToggle(config.key, v);
-              },
-            ),
-          ],
-        ),
-        onTap: () {
-          final nv = !isE;
-          setState(() {
-            if (nv && isOsc) {
-              for (final c in _osc) {
-                if (_local.containsKey(c.key)) _local[c.key]!.enabled = false;
-                if (c.key != config.key) widget.onToggle(c.key, false);
-              }
-            }
-            if (!_local.containsKey(config.key)) _local[config.key] = IndicatorSettings(enabled: nv);
-            else _local[config.key]!.enabled = nv;
-          });
-          widget.onToggle(config.key, nv);
-        },
+          ),
+        ],
       ),
     );
   }
