@@ -40,30 +40,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
   final Set<String> _sentNotifications = {};
   Map<String, double> _allIntervalThresholds = {};
 
-  final Map<String, IndicatorSettings> _indicators = {
-    'bb': IndicatorSettings(enabled: false, params: {'period': 20, 'stdDev1': 1.0, 'stdDev2': 2.0}),
-    'ema': IndicatorSettings(enabled: false, params: {'period1': 10, 'period2': 25, 'period3': 50}),
-    'sma': IndicatorSettings(enabled: false, params: {'period': 20}),
-    'wma': IndicatorSettings(enabled: false, params: {'period': 20}),
-    'ichimoku': IndicatorSettings(enabled: false, params: {'tenkan': 9, 'kijun': 26, 'senkouB': 52, 'displacement': 26}),
-    'parabolic': IndicatorSettings(enabled: false, params: {'acceleration': 0.02, 'maxAcceleration': 0.2}),
-    'envelope': IndicatorSettings(enabled: false, params: {'period': 20, 'deviation': 2.5}),
-    'keltner': IndicatorSettings(enabled: false, params: {'period': 20, 'multiplier': 2.0}),
-    'supertrend': IndicatorSettings(enabled: false, params: {'period': 10, 'multiplier': 3.0}),
-    'gmma': IndicatorSettings(enabled: false), // GMMAは期間固定が一般的
-    'rsi': IndicatorSettings(enabled: false, params: {'period': 14}),
-    'macd': IndicatorSettings(enabled: false, params: {'fast': 12, 'slow': 26, 'signal': 9}),
-    'stochastic': IndicatorSettings(enabled: false, params: {'kPeriod': 14, 'dPeriod': 3, 'smooth': 3}),
-    'cci': IndicatorSettings(enabled: false, params: {'period': 20}),
-    'ma_dev': IndicatorSettings(enabled: false, params: {'period': 25}),
-    'dmi': IndicatorSettings(enabled: false, params: {'period': 14}),
-    'adx': IndicatorSettings(enabled: false, params: {'period': 14}),
-    'rci': IndicatorSettings(enabled: false, params: {'period': 9}),
-    'momentum': IndicatorSettings(enabled: false, params: {'period': 10}),
-    'roc': IndicatorSettings(enabled: false, params: {'period': 12}),
-    'ultimate': IndicatorSettings(enabled: false, params: {'p1': 7, 'p2': 14, 'p3': 28}),
-    'trix': IndicatorSettings(enabled: false, params: {'period': 12}),
-  };
+  late final Map<String, IndicatorSettings> _indicators = _getDefaultIndicators();
 
   final List<String> _intervals = ['5m', '15m', '30m', '1h', '4h', '1d', '1wk', '1mo'];
   
@@ -275,6 +252,31 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       setState(() { _crossHistory = _parseServerCrossHistory(serverHistory, _interval); });
     }
   }
+
+  Map<String, IndicatorSettings> _getDefaultIndicators() => {
+    'bb': IndicatorSettings(enabled: false, params: {'period': 20, 'stdDev1': 1.0, 'stdDev2': 2.0}),
+    'ema': IndicatorSettings(enabled: false, params: {'period1': 10, 'period2': 25, 'period3': 50}),
+    'sma': IndicatorSettings(enabled: false, params: {'period': 20}),
+    'wma': IndicatorSettings(enabled: false, params: {'period': 20}),
+    'ichimoku': IndicatorSettings(enabled: false, params: {'tenkan': 9, 'kijun': 26, 'senkouB': 52, 'displacement': 26}),
+    'parabolic': IndicatorSettings(enabled: false, params: {'acceleration': 0.02, 'maxAcceleration': 0.2}),
+    'envelope': IndicatorSettings(enabled: false, params: {'period': 20, 'deviation': 2.5}),
+    'keltner': IndicatorSettings(enabled: false, params: {'period': 20, 'multiplier': 2.0}),
+    'supertrend': IndicatorSettings(enabled: false, params: {'period': 10, 'multiplier': 3.0}),
+    'gmma': IndicatorSettings(enabled: false, params: {'short1': 3, 'short2': 5, 'short3': 8, 'short4': 10, 'short5': 12, 'short6': 15, 'long1': 30, 'long2': 35, 'long3': 40, 'long4': 45, 'long5': 50, 'long6': 60}),
+    'rsi': IndicatorSettings(enabled: false, params: {'period': 14}),
+    'macd': IndicatorSettings(enabled: false, params: {'fast': 12, 'slow': 26, 'signal': 9}),
+    'stochastic': IndicatorSettings(enabled: false, params: {'kPeriod': 14, 'dPeriod': 3, 'smooth': 3}),
+    'cci': IndicatorSettings(enabled: false, params: {'period': 20}),
+    'ma_dev': IndicatorSettings(enabled: false, params: {'period': 25}),
+    'dmi': IndicatorSettings(enabled: false, params: {'period': 14}),
+    'adx': IndicatorSettings(enabled: false, params: {'period': 14}),
+    'rci': IndicatorSettings(enabled: false, params: {'period': 9}),
+    'momentum': IndicatorSettings(enabled: false, params: {'period': 10}),
+    'roc': IndicatorSettings(enabled: false, params: {'period': 12}),
+    'ultimate': IndicatorSettings(enabled: false, params: {'p1': 7, 'p2': 14, 'p3': 28}),
+    'trix': IndicatorSettings(enabled: false, params: {'period': 12}),
+  };
 
   Future<void> _syncIndicatorSettingsToServer() async {
     // 全てのパラメータを抽出
@@ -758,6 +760,19 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
         child: IndicatorSettingsSheet(
           indicators: _indicators,
           onChanged: (k, s) { setState(() => _indicators[k] = s); _syncIndicatorSettingsToServer(); },
+          onReset: () {
+            setState(() {
+              final defaults = _getDefaultIndicators();
+              defaults.forEach((key, value) {
+                if (_indicators.containsKey(key)) {
+                  _indicators[key]!.params.clear();
+                  _indicators[key]!.params.addAll(value.params);
+                }
+              });
+            });
+            _syncIndicatorSettingsToServer();
+            return _indicators;
+          },
           onToggle: (k, e) {
             setState(() {
               const oscillators = ['rsi', 'macd', 'stochastic', 'cci', 'ma_dev', 'dmi', 'adx', 'rci', 'momentum', 'roc', 'ultimate', 'trix'];

@@ -6,12 +6,14 @@ class IndicatorSettingsSheet extends StatefulWidget {
   final Map<String, IndicatorSettings> indicators;
   final Function(String, IndicatorSettings) onChanged;
   final Function(String, bool) onToggle;
+  final Map<String, IndicatorSettings> Function() onReset;
 
   const IndicatorSettingsSheet({
     super.key,
     required this.indicators,
     required this.onChanged,
     required this.onToggle,
+    required this.onReset,
   });
 
   @override
@@ -85,50 +87,38 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
                 decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 0, 8, 8),
+                padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
                 child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('インジケーター設定', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                    Container(
+                      width: 4, height: 18,
+                      margin: const EdgeInsets.only(right: 10),
+                      decoration: BoxDecoration(color: AppColors.primaryLight, borderRadius: BorderRadius.circular(2)),
+                    ),
+                    const Expanded(
+                      child: Text(
+                        'インジケーター設定',
+                        style: TextStyle(fontSize: 19, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 0.5),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                     Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        TextButton(
-                          onPressed: () {
-                            showDialog(
-                              context: context,
-                              builder: (context) => AlertDialog(
-                                backgroundColor: AppColors.surface,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                                title: const Text('設定のリセット', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                                content: const Text('すべてのインジケーターをオフにしますか？', style: TextStyle(color: AppColors.textSecondary)),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () => Navigator.pop(context),
-                                    child: const Text('キャンセル', style: TextStyle(color: AppColors.textSecondary)),
-                                  ),
-                                  ElevatedButton(
-                                    onPressed: () {
-                                      setState(() {
-                                        for (final k in _local.keys) {
-                                          _local[k]!.enabled = false;
-                                          widget.onToggle(k, false);
-                                        }
-                                      });
-                                      Navigator.pop(context);
-                                    },
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppColors.error,
-                                      foregroundColor: Colors.white,
-                                    ),
-                                    child: const Text('すべてオフにする', style: TextStyle(fontWeight: FontWeight.bold)),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                          child: const Text('すべてオフ', style: TextStyle(color: AppColors.primaryLight, fontWeight: FontWeight.bold)),
+                        Container(
+                          margin: const EdgeInsets.only(right: 4),
+                          decoration: BoxDecoration(
+                            color: AppColors.primaryLight.withAlpha(30),
+                            shape: BoxShape.circle,
+                          ),
+                          child: IconButton(
+                            onPressed: _showResetMenu,
+                            icon: const Icon(Icons.settings_backup_restore, color: AppColors.primaryLight, size: 24),
+                            tooltip: '設定リセットメニュー',
+                            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                          ),
                         ),
-                        const SizedBox(width: 40), // ×ボタンのためのスペースを確保
+                        const SizedBox(width: 36), // ×ボタンのためのスペースを確保
                       ],
                     ),
                   ],
@@ -200,6 +190,113 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
       ],
     );
   }
+
+  void _showResetMenu() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: const Row(
+          children: [
+            Icon(Icons.settings_backup_restore, color: AppColors.primaryLight, size: 24),
+            SizedBox(width: 12),
+            Text('インジケーターのリセット', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _buildResetOption(
+              icon: Icons.tune,
+              title: '設定値をリセット',
+              subtitle: '期間などの数値を初期値に戻します',
+              color: AppColors.warning,
+              onTap: () {
+                Navigator.pop(context);
+                // 親（DetailScreen）側のデータをリセットし、最新のデータを取得する
+                final updatedIndicators = widget.onReset();
+                
+                setState(() {
+                  for (final key in updatedIndicators.keys) {
+                    if (_local.containsKey(key)) {
+                      // 現在の画面上のON/OFF状態を維持する
+                      final currentEnabled = _local[key]?.enabled ?? false;
+                      _local[key] = updatedIndicators[key]!.copyWith();
+                      _local[key]!.enabled = currentEnabled;
+                    }
+                  }
+                });
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('パラメータを初期値に戻しました')));
+              },
+            ),
+            const SizedBox(height: 12),
+            _buildResetOption(
+              icon: Icons.visibility_off_outlined,
+              title: 'すべてオフにする',
+              subtitle: '表示中の指標をすべて非表示にします',
+              color: AppColors.error,
+              onTap: () {
+                Navigator.pop(context);
+                setState(() {
+                  for (final k in _local.keys) {
+                    _local[k]!.enabled = false;
+                    widget.onToggle(k, false);
+                  }
+                });
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('すべての指標をオフにしました')));
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('キャンセル', style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResetOption({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(16),
+    child: Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: color.withAlpha(15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withAlpha(30)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(color: color.withAlpha(30), shape: BoxShape.circle),
+            child: Icon(icon, color: color, size: 22),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15)),
+                Text(subtitle, style: TextStyle(color: AppColors.textSecondary.withOpacity(0.8), fontSize: 11)),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right, color: Colors.white24, size: 20),
+        ],
+      ),
+    ),
+  );
 
   Widget _buildSectionHeader(String t, String s, IconData i, Color c, bool isExpanded, VoidCallback onTap) => InkWell(
     onTap: onTap,
@@ -312,65 +409,131 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.surface,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        title: Column(
           children: [
-            Icon(config.icon, color: config.color, size: 24),
-            const SizedBox(width: 12),
-            Text('${config.name} 設定', style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: config.color.withAlpha(30), borderRadius: BorderRadius.circular(12)),
+                  child: Icon(config.icon, color: config.color, size: 24),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('${config.name} 設定', style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
+                      Text(config.fullName, style: TextStyle(color: config.color.withOpacity(0.7), fontSize: 12)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const Divider(color: Colors.white10, height: 1),
           ],
         ),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
-            children: tempParams.entries.map((e) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    Expanded(child: Text(_getParamLabel(e.key), style: const TextStyle(color: AppColors.textSecondary))),
-                    const SizedBox(width: 16),
-                    SizedBox(
-                      width: 80,
-                      child: TextField(
-                        keyboardType: TextInputType.number,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.right,
-                        decoration: InputDecoration(
-                          filled: true,
-                          fillColor: Colors.black26,
-                          isDense: true,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
-                        ),
-                        controller: TextEditingController(text: e.value.toString()),
-                        onChanged: (v) {
-                          if (e.value is int) {
-                            tempParams[e.key] = int.tryParse(v) ?? e.value;
-                          } else if (e.value is double) {
-                            tempParams[e.key] = double.tryParse(v) ?? e.value;
-                          }
-                        },
-                      ),
-                    ),
-                  ],
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16, top: 8),
+                child: Text(
+                  '数値を入力してインジケーターの計算期間を調整できます。',
+                  style: TextStyle(color: AppColors.textSecondary.withOpacity(0.8), fontSize: 13),
                 ),
-              );
-            }).toList(),
+              ),
+              ...tempParams.entries.map((e) {
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withAlpha(10),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white.withAlpha(10)),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(_getParamLabel(e.key), style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500)),
+                            const SizedBox(height: 2),
+                            Text('Parameter: ${e.key}', style: TextStyle(color: AppColors.textSecondary.withOpacity(0.5), fontSize: 10)),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      SizedBox(
+                        width: 90,
+                        child: TextField(
+                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                          textAlign: TextAlign.right,
+                          decoration: InputDecoration(
+                            filled: true,
+                            fillColor: Colors.black26,
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: config.color, width: 1.5)),
+                          ),
+                          controller: TextEditingController(text: e.value.toString()),
+                          onChanged: (v) {
+                            if (e.value is int) {
+                              tempParams[e.key] = int.tryParse(v) ?? e.value;
+                            } else if (e.value is double) {
+                              tempParams[e.key] = double.tryParse(v) ?? e.value;
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ],
           ),
         ),
+        actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('キャンセル', style: TextStyle(color: AppColors.textSecondary))),
-          ElevatedButton(
-            onPressed: () {
-              setState(() {
-                _local[config.key] = settings.copyWith(params: tempParams);
-              });
-              widget.onChanged(config.key, _local[config.key]!);
-              Navigator.pop(context);
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: config.color, foregroundColor: Colors.white),
-            child: const Text('保存', style: TextStyle(fontWeight: FontWeight.bold)),
+          Row(
+            children: [
+              Expanded(
+                child: TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('キャンセル', style: TextStyle(color: AppColors.textSecondary, fontWeight: FontWeight.bold)),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _local[config.key] = settings.copyWith(params: tempParams);
+                    });
+                    widget.onChanged(config.key, _local[config.key]!);
+                    Navigator.pop(context);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: config.color,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('保存する', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -379,18 +542,38 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
 
   String _getParamLabel(String key) {
     switch (key) {
-      case 'period': return '期間';
-      case 'period1': return '短期期間';
-      case 'period2': return '中期期間';
-      case 'period3': return '長期期間';
-      case 'stdDev1': return '標準偏差1';
-      case 'stdDev2': return '標準偏差2';
-      case 'fast': return '短期EMA';
-      case 'slow': return '長期EMA';
-      case 'signal': return 'シグナル';
+      case 'period': return '計算期間';
+      case 'period1': return '短期EMA期間';
+      case 'period2': return '中期EMA期間';
+      case 'period3': return '長期EMA期間';
+      case 'stdDev1': return '標準偏差 (1σ)';
+      case 'stdDev2': return '標準偏差 (2σ)';
+      case 'fast': return '短期EMA (Fast)';
+      case 'slow': return '長期EMA (Slow)';
+      case 'signal': return 'シグナル期間';
       case 'kPeriod': return '%K期間';
       case 'dPeriod': return '%D期間';
-      case 'smooth': return '平滑化';
+      case 'smooth': return '平滑化 (Slowing)';
+      case 'tenkan': return '転換線 期間';
+      case 'kijun': return '基準線 期間';
+      case 'senkouB': return '先行スパンB 期間';
+      case 'displacement': return '先行スパン 変位';
+      case 'acceleration': return '加速係数 (AF)';
+      case 'maxAcceleration': return '最大加速係数';
+      case 'deviation': return '乖離率 (%)';
+      case 'multiplier': return '乗数 (Multiplier)';
+      case 'short1': return '短期線1';
+      case 'short2': return '短期線2';
+      case 'short3': return '短期線3';
+      case 'short4': return '短期線4';
+      case 'short5': return '短期線5';
+      case 'short6': return '短期線6';
+      case 'long1': return '長期線1';
+      case 'long2': return '長期線2';
+      case 'long3': return '長期線3';
+      case 'long4': return '長期線4';
+      case 'long5': return '長期線5';
+      case 'long6': return '長期線6';
       default: return key;
     }
   }
