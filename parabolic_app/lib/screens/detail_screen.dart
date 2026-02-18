@@ -538,7 +538,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       body: Stack(
         children: [
           _buildBody(),
-          const FloatingSlideMenu(),
+          FloatingSlideMenu(symbol: widget.symbol),
         ],
       ),
       bottomNavigationBar: DetailFooter(

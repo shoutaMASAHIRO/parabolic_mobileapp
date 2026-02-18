@@ -1,8 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_colors.dart';
+import '../../screens/option_screen.dart';
+import '../../screens/analysis_screen.dart';
+import '../../screens/news_screen.dart';
+import '../../screens/forum_screen.dart';
 
 class FloatingSlideMenu extends StatefulWidget {
-  const FloatingSlideMenu({super.key});
+  final String symbol;
+  const FloatingSlideMenu({super.key, required this.symbol});
 
   @override
   State<FloatingSlideMenu> createState() => _FloatingSlideMenuState();
@@ -10,6 +15,13 @@ class FloatingSlideMenu extends StatefulWidget {
 
 class _FloatingSlideMenuState extends State<FloatingSlideMenu> {
   bool _isExpanded = false;
+
+  void _navigateTo(Widget screen) {
+    setState(() => _isExpanded = false);
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => screen),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,7 +31,6 @@ class _FloatingSlideMenuState extends State<FloatingSlideMenu> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // メインのトリガーボタン
           GestureDetector(
             onTap: () => setState(() => _isExpanded = !_isExpanded),
             child: Container(
@@ -38,11 +49,6 @@ class _FloatingSlideMenuState extends State<FloatingSlideMenu> {
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.5),
-                    blurRadius: 4,
-                    offset: const Offset(0, 2),
-                  ),
                 ],
               ),
               child: Icon(
@@ -53,27 +59,19 @@ class _FloatingSlideMenuState extends State<FloatingSlideMenu> {
             ),
           ),
           
-          // スライドアウトするメニュー部分
           AnimatedContainer(
             duration: const Duration(milliseconds: 300),
             curve: Curves.easeInOut,
             margin: EdgeInsets.only(left: _isExpanded ? 16 : 0),
-            height: 56, // ボタンと合わせる
+            height: 56, 
             width: _isExpanded ? 280 : 0, 
             clipBehavior: Clip.antiAlias,
             decoration: BoxDecoration(
-              color: AppColors.surface.withOpacity(0.6), // 不透明にする
+              color: AppColors.surface.withOpacity(0.6),
               borderRadius: BorderRadius.circular(28),
               border: _isExpanded 
                   ? Border.all(color: AppColors.primaryLight.withOpacity(0.6), width: 1.5) 
                   : null,
-              boxShadow: _isExpanded ? [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.4),
-                  blurRadius: 10,
-                  offset: const Offset(0, 4),
-                ),
-              ] : null,
             ),
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,
@@ -82,13 +80,29 @@ class _FloatingSlideMenuState extends State<FloatingSlideMenu> {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Row(
                   children: [
-                    _buildMenuItem(Icons.settings_outlined, 'オプション'),
+                    _buildMenuItem(
+                      Icons.settings_outlined, 
+                      'オプション', 
+                      () => _navigateTo(OptionScreen(symbol: widget.symbol))
+                    ),
                     _buildDivider(),
-                    _buildMenuItem(Icons.analytics_outlined, '分析'),
+                    _buildMenuItem(
+                      Icons.analytics_outlined, 
+                      '分析', 
+                      () => _navigateTo(AnalysisScreen(symbol: widget.symbol))
+                    ),
                     _buildDivider(),
-                    _buildMenuItem(Icons.newspaper_outlined, 'ニュース'),
+                    _buildMenuItem(
+                      Icons.newspaper_outlined, 
+                      'ニュース', 
+                      () => _navigateTo(NewsScreen(symbol: widget.symbol))
+                    ),
                     _buildDivider(),
-                    _buildMenuItem(Icons.forum_outlined, '掲示板'),
+                    _buildMenuItem(
+                      Icons.forum_outlined, 
+                      '掲示板', 
+                      () => _navigateTo(ForumScreen(symbol: widget.symbol))
+                    ),
                   ],
                 ),
               ),
@@ -99,14 +113,11 @@ class _FloatingSlideMenuState extends State<FloatingSlideMenu> {
     );
   }
 
-  Widget _buildMenuItem(IconData icon, String label) {
+  Widget _buildMenuItem(IconData icon, String label, VoidCallback onTap) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () {
-          debugPrint('$label tapped');
-          setState(() => _isExpanded = false);
-        },
+        onTap: onTap,
         borderRadius: BorderRadius.circular(20),
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -121,7 +132,6 @@ class _FloatingSlideMenuState extends State<FloatingSlideMenu> {
                   color: Colors.white, 
                   fontSize: 10, 
                   fontWeight: FontWeight.bold,
-                  letterSpacing: 0.5,
                 ),
               ),
             ],
