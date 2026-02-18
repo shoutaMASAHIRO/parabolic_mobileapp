@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
+import '../providers/market_data_provider.dart';
 import '../theme/app_colors.dart';
+import '../widgets/app_header.dart';
 import 'login_screen.dart';
 import 'favorites_screen.dart';
 import 'top_screen.dart';
@@ -28,18 +30,35 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   int _currentIndex = 0;
   MarketCategory? _selectedCategory;
   final ChartService _chartService = ChartService();
+  TabController? _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: MarketCategory.values.length, vsync: this);
+
+    // データの初期ロード
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        context.read<MarketDataProvider>().refreshAllData();
+      }
+    });
+
     // 初期カテゴリが指定されていればセットする
     if (widget.initialCategory != null) {
       _selectedCategory = widget.initialCategory;
+      _tabController!.index = widget.initialCategory!.index;
     }
+  }
+
+  @override
+  void dispose() {
+    _tabController?.dispose();
+    super.dispose();
   }
 
   Future<void> _handleLogout() async {
@@ -119,9 +138,18 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // ホットリロード等で未初期化の場合に備える
+    _tabController ??= TabController(length: MarketCategory.values.length, vsync: this);
+    
+    final bool showTabs = _selectedCategory != null || _currentIndex == 1 || _currentIndex == 2;
+
     return Scaffold(
       backgroundColor: AppColors.scaffoldBackground,
-      // AppBarを削除し、各画面のAppBarを表示させる
+      appBar: AppHeader(
+        showBackButton: _selectedCategory != null,
+        onBack: () => setState(() => _selectedCategory = null),
+        bottom: showTabs ? _buildTabBar() : null,
+      ),
       body: _buildBody(),
       bottomNavigationBar: Container(
         height: 100, 
@@ -135,7 +163,7 @@ class _HomeScreenState extends State<HomeScreen> {
             _buildFooterItem(
               icon: Icons.home, 
               label: 'ホーム', 
-              isSelected: _currentIndex == 0,
+              isSelected: _currentIndex == 0 && _selectedCategory == null,
               onTap: () => setState(() {
                 _currentIndex = 0;
                 _selectedCategory = null;
@@ -162,12 +190,40 @@ class _HomeScreenState extends State<HomeScreen> {
             _buildFooterItem(
               icon: Icons.category_outlined, 
               label: 'カテゴリー', 
-              isSelected: false, // カテゴリーはダイアログ表示用なので選択状態にはしない
+              isSelected: false, 
               onTap: _showCategorySelection,
             ),
           ],
         ),
       ),
+    );
+  }
+
+  PreferredSizeWidget _buildTabBar() {
+    return TabBar(
+      controller: _tabController,
+      labelColor: AppColors.primary,
+      unselectedLabelColor: AppColors.textSecondary,
+      indicatorColor: AppColors.primary,
+      indicatorWeight: 3,
+      tabs: MarketCategory.values.map((cat) {
+        Color iconColor;
+        switch (cat) {
+          case MarketCategory.crypto: iconColor = AppColors.crypto; break;
+          case MarketCategory.forex: iconColor = AppColors.forex; break;
+          case MarketCategory.stock: iconColor = AppColors.stock; break;
+        }
+        return Tab(
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(cat.icon, size: 18, color: iconColor),
+              const SizedBox(width: 8),
+              Text(cat.label),
+            ],
+          ),
+        );
+      }).toList(),
     );
   }
 
@@ -220,6 +276,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     setState(() {
                       _currentIndex = 0; // ホームタブを表示
                       _selectedCategory = cat; // その中の銘柄一覧を表示
+                      _tabController?.index = cat.index;
                     });
                   },
                   borderRadius: BorderRadius.circular(16),
@@ -258,6 +315,7 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_selectedCategory != null) {
       return MarketListScreen(
         initialCategory: _selectedCategory!,
+        tabController: _tabController!,
         onBack: () => setState(() => _selectedCategory = null),
       );
     }
@@ -266,16 +324,23 @@ class _HomeScreenState extends State<HomeScreen> {
       case 0:
         return TopScreen(
           onCategorySelected: (category) {
-            setState(() => _selectedCategory = category);
+            setState(() {
+              _selectedCategory = category;
+              _tabController?.index = category.index;
+            });
           },
           onEmailSettingsPressed: _showEmailRegistrationDialog,
         );
       case 1:
-        return FavoritesScreen(onBack: () => setState(() => _currentIndex = 0));
+        return FavoritesScreen(
+          tabController: _tabController!,
+          onBack: () => setState(() => _currentIndex = 0),
+        );
       case 2:
-        return AlertSymbolsScreen(onBack: () => setState(() => _currentIndex = 0));
-      case 3:
-        return const Center(child: Text('カテゴリー選択', style: TextStyle(color: AppColors.textSecondary))); // ダイアログで表示
+        return AlertSymbolsScreen(
+          tabController: _tabController!,
+          onBack: () => setState(() => _currentIndex = 0),
+        );
       default:
         return const SizedBox.shrink();
     }

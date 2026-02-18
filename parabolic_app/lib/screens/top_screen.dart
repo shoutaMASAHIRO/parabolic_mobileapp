@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../theme/app_colors.dart';
 import '../theme/app_text_styles.dart';
+import '../widgets/app_header.dart';
 import 'home_screen.dart' show MarketCategory;
 
 class TopScreen extends StatelessWidget {
@@ -15,54 +16,46 @@ class TopScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.scaffoldBackground,
-      appBar: AppBar(
-        title: const Text('Parabolic', style: TextStyle(fontWeight: FontWeight.bold)),
-        centerTitle: true,
-        elevation: 0,
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('マーケット', style: AppTextStyles.headline3),
-            const SizedBox(height: 16),
-            _buildCategoryCard(
-              context,
-              category: MarketCategory.crypto,
-              description: 'ビットコイン、イーサリアムなど',
-              color: AppColors.crypto,
-            ),
-            const SizedBox(height: 16),
-            _buildCategoryCard(
-              context,
-              category: MarketCategory.forex,
-              description: 'ドル円、ユーロ円など',
-              color: AppColors.forex,
-            ),
-            const SizedBox(height: 16),
-            _buildCategoryCard(
-              context,
-              category: MarketCategory.stock,
-              description: '日本株、米国株など',
-              color: AppColors.stock,
-            ),
-            
-            const SizedBox(height: 40),
-            const Text('通知・設定', style: AppTextStyles.headline3),
-            const SizedBox(height: 16),
-            _buildSettingsCard(
-              context,
-              title: 'メールアドレス登録',
-              description: 'アラート通知をメールで受け取ります',
-              icon: Icons.alternate_email,
-              color: AppColors.primary,
-              onTap: onEmailSettingsPressed,
-            ),
-          ],
-        ),
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('マーケット', style: AppTextStyles.headline3),
+          const SizedBox(height: 16),
+          _buildCategoryCard(
+            context,
+            category: MarketCategory.crypto,
+            description: 'ビットコイン、イーサリアムなど',
+            color: AppColors.crypto,
+          ),
+          const SizedBox(height: 16),
+          _buildCategoryCard(
+            context,
+            category: MarketCategory.forex,
+            description: 'ドル円、ユーロ円など',
+            color: AppColors.forex,
+          ),
+          const SizedBox(height: 16),
+          _buildCategoryCard(
+            context,
+            category: MarketCategory.stock,
+            description: '日本株、米国株など',
+            color: AppColors.stock,
+          ),
+          
+          const SizedBox(height: 40),
+          const Text('通知・設定', style: AppTextStyles.headline3),
+          const SizedBox(height: 16),
+          _buildSettingsCard(
+            context,
+            title: 'メールアドレス登録',
+            description: 'アラート通知をメールで受け取ります',
+            icon: Icons.alternate_email,
+            color: AppColors.primary,
+            onTap: onEmailSettingsPressed,
+          ),
+        ],
       ),
     );
   }
