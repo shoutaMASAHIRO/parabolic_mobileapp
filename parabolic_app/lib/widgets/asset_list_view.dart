@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import 'dart:math';
 import '../models/chart_configs.dart';
+import '../providers/market_data_provider.dart';
 import '../theme/app_colors.dart';
 import '../widgets/rate_list_item.dart';
 import '../screens/detail_screen.dart';
@@ -122,10 +124,9 @@ class _AssetListViewState extends State<AssetListView> {
                             ? item['displayName'] as String
                             : symbol.replaceAll('-USD', '');
                         
-                        final random = Random(symbol.hashCode);
-                        final price = _generateMockPrice(widget.category, random);
-                        final change = _generateMockChange(price, random);
-                        final changePercent = _generateMockChangePercent(change, price);
+                        // Provider から最新の価格情報を取得
+                        final provider = context.watch<MarketDataProvider>();
+                        final priceInfo = provider.getPriceInfo(symbol);
 
                         return Dismissible(
                           key: Key(symbol),
@@ -170,9 +171,9 @@ class _AssetListViewState extends State<AssetListView> {
                           child: RateListItem(
                             symbol: symbol,
                             name: displayName,
-                            price: price,
-                            change: change,
-                            changePercent: changePercent,
+                            price: priceInfo['price']!,
+                            change: priceInfo['change']!,
+                            changePercent: priceInfo['percent']!,
                             icon: widget.category.icon,
                             iconColor: CategoryColors.forCategoryName(widget.category.name),
                             hasNotification: widget.notifiedSymbols.contains(symbol),
@@ -213,35 +214,5 @@ class _AssetListViewState extends State<AssetListView> {
           ),
       ],
     );
-  }
-
-  String _generateMockPrice(MarketCategory category, Random random) {
-    switch (category) {
-      case MarketCategory.crypto:
-        if (random.nextBool()) {
-          return '¥${(4000000 + random.nextInt(5000000)).toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}';
-        } else {
-          return '¥${(1000 + random.nextInt(90000)).toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}';
-        }
-      case MarketCategory.forex:
-        return '${(100 + random.nextInt(50))}.${(random.nextInt(99)).toString().padLeft(2, '0')}';
-      case MarketCategory.stock:
-        return '¥${(1000 + random.nextInt(9000)).toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (Match m) => '${m[1]},')}';
-    }
-  }
-
-  String _generateMockChange(String priceStr, Random random) {
-     double priceVal = double.tryParse(priceStr.replaceAll('¥', '').replaceAll(',', '')) ?? 1000;
-     double change = priceVal * (random.nextDouble() * 0.04 - 0.02);
-     String sign = change >= 0 ? '+' : '';
-     return '$sign${change.toStringAsFixed(priceStr.contains('.') ? 2 : 0)}';
-  }
-
-   String _generateMockChangePercent(String changeStr, String priceStr) {
-     double change = double.tryParse(changeStr) ?? 0;
-     double price = double.tryParse(priceStr.replaceAll('¥', '').replaceAll(',', '')) ?? 1000;
-     double percent = (change / price) * 100;
-     String sign = percent >= 0 ? '+' : '';
-     return '$sign${percent.toStringAsFixed(2)}%';
   }
 }

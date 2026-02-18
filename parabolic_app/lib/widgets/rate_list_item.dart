@@ -130,7 +130,7 @@ class RateListItem extends StatelessWidget {
             Expanded(
               flex: 4,
               child: Text(
-                price,
+                price.length > 10 ? '${price.substring(0, 10)}...' : price,
                 textAlign: TextAlign.right,
                 style: TextStyle(
                   fontSize: 16,
@@ -138,6 +138,7 @@ class RateListItem extends StatelessWidget {
                   color: changeColor, // 価格も色付けする（GMOスタイル）
                   fontFamily: 'RobotoMono', // 等幅フォントっぽく
                 ),
+                maxLines: 1,
               ),
             ),
 

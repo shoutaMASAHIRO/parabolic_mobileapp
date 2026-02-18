@@ -15,6 +15,7 @@ import '../widgets/indicator_settings_sheet.dart';
 import '../widgets/detail/chart_timer_widget.dart';
 import '../widgets/detail/detail_symbol_header.dart';
 import '../widgets/detail/detail_footer.dart';
+import '../widgets/detail/floating_slide_menu.dart';
 import 'market_list_screen.dart';
 import 'memo_screen.dart';
 import 'home_screen.dart';
@@ -534,7 +535,12 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
                 ),
         ),
       ),
-      body: _buildBody(),
+      body: Stack(
+        children: [
+          _buildBody(),
+          const FloatingSlideMenu(),
+        ],
+      ),
       bottomNavigationBar: DetailFooter(
         isChartMaximized: _isMaximizedChart, 
         onHomeTap: () => Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => HomeScreen()), (route) => false), 
