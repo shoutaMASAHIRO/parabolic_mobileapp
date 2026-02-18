@@ -12,6 +12,9 @@ import '../services/memo_service.dart';
 import '../theme/app_colors.dart';
 import '../widgets/financial_chart.dart';
 import '../widgets/indicator_settings_sheet.dart';
+import '../widgets/detail/chart_timer_widget.dart';
+import '../widgets/detail/detail_symbol_header.dart';
+import '../widgets/detail/detail_footer.dart';
 import 'market_list_screen.dart';
 import 'memo_screen.dart';
 import 'home_screen.dart';
@@ -36,18 +39,14 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
   static const int _refreshIntervalSeconds = 60;
   Timer? _countdownTimer;
   int _secondsUntilRefresh = _refreshIntervalSeconds;
+  bool _isRefreshing = false;
 
   int _memoCount = 0;
   final Set<String> _sentNotifications = {};
   Map<String, double> _allIntervalThresholds = {};
-
   late final Map<String, IndicatorSettings> _indicators = _getDefaultIndicators();
 
   final List<String> _intervals = ['5m', '15m', '30m', '1h', '4h', '1d', '1wk', '1mo'];
-  
-  static int _safeInt(dynamic v, int d) => v is int ? v : (v is num ? v.toInt() : (v is String ? int.tryParse(v) ?? d : d));
-  static double _safeDouble(dynamic v, double d) => v is double ? v : (v is num ? v.toDouble() : (v is String ? double.tryParse(v) ?? d : d));
-
   List<CrossEvent> _crossHistory = [];
   double? _threshold;
   List<String> _alertTargetIndicators = ['ema']; 
@@ -65,6 +64,14 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
     _startRefreshTimer();
   }
 
+  @override
+  void dispose() {
+    _countdownTimer?.cancel();
+    super.dispose();
+  }
+
+  // --- Data Loading & Sync Logic ---
+
   Future<void> _loadAllIntervalThresholds() async {
     final thresholds = await _chartService.getAllThresholdsFromServer(widget.symbol);
     if (mounted) setState(() => _allIntervalThresholds = thresholds);
@@ -74,9 +81,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
     try {
       final memos = await _memoService.getMemos(widget.symbol);
       if (mounted) setState(() => _memoCount = memos.length);
-    } catch (e) {
-      debugPrint('Error loading memo count: $e');
-    }
+    } catch (e) { debugPrint('Error loading memo count: $e'); }
   }
 
   Future<void> _loadIndicatorSettingsFromServer() async {
@@ -110,11 +115,39 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
     }
   }
 
-  @override
-  void dispose() {
-    _countdownTimer?.cancel();
-    super.dispose();
+  Future<void> _syncIndicatorSettingsToServer() async {
+    final Map<String, dynamic> allParams = {};
+    _indicators.forEach((key, settings) { allParams[key] = settings.params; });
+    await _chartService.saveIndicatorSettingsToServer(
+      symbol: widget.symbol, 
+      bbEnabled: _indicators['bb']?.enabled ?? false, 
+      emaEnabled: _indicators['ema']?.enabled ?? false, 
+      bbPeriod: _safeInt(_indicators['bb']?.params['period'], 20), 
+      bbStdDev: _safeDouble(_indicators['bb']?.params['stdDev2'], 2.0),
+      emaPeriod1: _safeInt(_indicators['ema']?.params['period1'], 10), 
+      emaPeriod2: _safeInt(_indicators['ema']?.params['period2'], 25), 
+      emaPeriod3: _safeInt(_indicators['ema']?.params['period3'], 50), 
+      emailAlertsEnabled: _emailNotificationEnabled,
+      alertTargetIndicators: _alertTargetIndicators,
+      allParams: allParams,
+      rsiEnabled: _indicators['rsi']?.enabled ?? false, 
+      rsiPeriod: _safeInt(_indicators['rsi']?.params['period'], 14), 
+      macdEnabled: _indicators['macd']?.enabled ?? false, 
+      macdFast: _safeInt(_indicators['macd']?.params['fast'], 12), 
+      macdSlow: _safeInt(_indicators['macd']?.params['slow'], 26), 
+      macdSignal: _safeInt(_indicators['macd']?.params['signal'], 9),
+      stochasticEnabled: _indicators['stochastic']?.enabled ?? false, 
+      stochKPeriod: _safeInt(_indicators['stochastic']?.params['kPeriod'], 14), 
+      stochDPeriod: _safeInt(_indicators['stochastic']?.params['dPeriod'], 3), 
+      stochSmooth: _safeInt(_indicators['stochastic']?.params['smooth'], 3),
+      cciEnabled: _indicators['cci']?.enabled ?? false, 
+      cciPeriod: _safeInt(_indicators['cci']?.params['period'], 20),
+    );
+    final thresholds = await _chartService.getAllThresholdsFromServer(widget.symbol);
+    if (mounted) context.read<MarketDataProvider>().updateSymbolCache(widget.symbol, thresholds);
   }
+
+  // --- Refresh Timer Logic ---
 
   void _startRefreshTimer() {
     _countdownTimer?.cancel();
@@ -132,17 +165,12 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
     });
   }
 
-  bool _isRefreshing = false;
-
   Future<void> _loadData() async {
     setState(() { _isLoading = true; _error = null; });
     try {
       final data = await _chartService.getChartData(widget.symbol, interval: _interval);
       if (mounted) {
-        setState(() {
-          _candles = data;
-          _isLoading = false;
-        });
+        setState(() { _candles = data; _isLoading = false; });
         _refreshCrossHistory();
       }
     } catch (e) { if (mounted) setState(() { _error = e.toString(); _isLoading = false; }); }
@@ -176,9 +204,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
               final success = await _chartService.sendThresholdEmail(
                 symbol: widget.symbol, interval: event.interval, crossEvent: event, currentPrice: currentPrice, threshold: _threshold!,
               );
-              if (success) {
-                _sentNotifications.add(notificationKey);
-              }
+              if (success) _sentNotifications.add(notificationKey);
             }
           }
         }
@@ -186,6 +212,236 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       }
     } catch (e) { debugPrint('Error in refreshChartData: $e'); }
   }
+
+  // --- UI Action Handlers ---
+
+  void _showIntervalSettings() {
+    showDialog(
+      context: context, 
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent, 
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24), 
+        child: Stack(
+          clipBehavior: Clip.none, 
+          children: [
+            Container(
+              decoration: const BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.all(Radius.circular(20))), 
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 40), 
+              child: Column(
+                mainAxisSize: MainAxisSize.min, 
+                children: [
+                  Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 24), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), 
+                  const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.access_time, color: AppColors.primaryLight, size: 20), SizedBox(width: 8), Text('時間足選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))]), 
+                  const SizedBox(height: 32), 
+                  Wrap(spacing: 12, runSpacing: 16, alignment: WrapAlignment.center, children: _intervals.map((i) => _buildIntervalOption(i)).toList())
+                ]
+              )
+            ), 
+            Positioned(top: 8, right: 8, child: IconButton(onPressed: () => Navigator.pop(context), icon: Container(padding: const EdgeInsets.all(4), decoration: BoxDecoration(color: Colors.white.withAlpha(20), shape: BoxShape.circle), child: const Icon(Icons.close, color: Colors.white54, size: 20)), tooltip: '閉じる'))
+          ]
+        )
+      )
+    );
+  }
+
+  Widget _buildIntervalOption(String i) {
+    final bool isSelected = _interval == i;
+    final bool hasThreshold = _allIntervalThresholds.containsKey(i);
+    return GestureDetector(
+      onTap: () { setState(() { _interval = i; }); _loadData(); _loadCrossSettings(); Navigator.pop(context); },
+      child: Container(
+        width: (MediaQuery.of(context).size.width - 100) / 3, 
+        padding: const EdgeInsets.symmetric(vertical: 14), 
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primary.withAlpha(40) : Colors.white.withAlpha(10), 
+          borderRadius: BorderRadius.circular(12), 
+          border: Border.all(color: isSelected ? AppColors.primaryLight : (hasThreshold ? AppColors.warning.withAlpha(100) : Colors.transparent), width: 1.5)
+        ), 
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center, 
+          children: [
+            Text(_getIntervalLabel(i), style: TextStyle(color: isSelected ? Colors.white : (hasThreshold ? AppColors.warning : AppColors.textSecondary), fontWeight: isSelected || hasThreshold ? FontWeight.bold : FontWeight.normal, fontSize: 15)), 
+            if (hasThreshold) ...[const SizedBox(width: 4), const Icon(Icons.notifications_active, size: 16, color: AppColors.warning)]
+          ]
+        )
+      ),
+    );
+  }
+
+  void _showChartTypeSettings() {
+    showDialog(
+      context: context, 
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent, 
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24), 
+        child: Stack(
+          clipBehavior: Clip.none, 
+          children: [
+            Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 40), 
+              decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(20)), 
+              child: Column(
+                mainAxisSize: MainAxisSize.min, 
+                children: [
+                  Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 24), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), 
+                  const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.bar_chart, color: AppColors.primaryLight, size: 22), SizedBox(width: 8), Text('チャートタイプ選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))]), 
+                  const SizedBox(height: 32), 
+                  LayoutBuilder(builder: (context, constraints) { 
+                    final itemWidth = (constraints.maxWidth - 12) / 2; 
+                    return Wrap(spacing: 12, runSpacing: 12, alignment: WrapAlignment.center, children: [
+                      _buildChartTypeOption(type: ChartType.heikinAshi, label: '平均足', icon: Icons.bar_chart, width: itemWidth), 
+                      _buildChartTypeOption(type: ChartType.candlestick, label: 'ローソク足', icon: Icons.candlestick_chart, width: itemWidth), 
+                      _buildChartTypeOption(type: ChartType.dot, label: 'ドット', icon: Icons.scatter_plot, width: itemWidth), 
+                      _buildChartTypeOption(type: ChartType.line, label: '折れ線', icon: Icons.show_chart, width: itemWidth)
+                    ]); 
+                  })
+                ]
+              )
+            ), 
+            Positioned(top: 8, right: 8, child: IconButton(onPressed: () => Navigator.pop(context), icon: Container(padding: const EdgeInsets.all(4), decoration: BoxDecoration(color: Colors.white.withAlpha(20), shape: BoxShape.circle), child: const Icon(Icons.close, color: Colors.white54, size: 20)), tooltip: '閉じる'))
+          ]
+        )
+      )
+    );
+  }
+
+  Widget _buildChartTypeOption({required ChartType type, required String label, required IconData icon, required double width}) {
+    final bool isSelected = _chartType == type;
+    return GestureDetector(
+      onTap: () { setState(() { _chartType = type; }); Navigator.pop(context); },
+      child: Container(
+        width: width, 
+        padding: const EdgeInsets.symmetric(vertical: 20), 
+        decoration: BoxDecoration(
+          color: isSelected ? AppColors.primary.withAlpha(40) : Colors.white.withAlpha(5), 
+          borderRadius: BorderRadius.circular(16), 
+          border: Border.all(color: isSelected ? AppColors.primaryLight : Colors.white.withAlpha(10), width: isSelected ? 2.0 : 1.0), 
+          boxShadow: isSelected ? [BoxShadow(color: AppColors.primary.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 4))] : null
+        ), 
+        child: Column(
+          children: [
+            Icon(icon, size: 36, color: isSelected ? AppColors.primaryLight : AppColors.textSecondary), 
+            const SizedBox(height: 12), 
+            Text(label, style: TextStyle(fontSize: 14, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? Colors.white : AppColors.textSecondary))
+          ]
+        )
+      ),
+    );
+  }
+
+  void _showIndicatorSettings() {
+    showDialog(
+      context: context, 
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent, 
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24), 
+        child: IndicatorSettingsSheet(
+          indicators: _indicators, 
+          onChanged: (k, s) { setState(() => _indicators[k] = s); _syncIndicatorSettingsToServer(); }, 
+          onReset: () { 
+            setState(() { 
+              final defaults = _getDefaultIndicators(); 
+              defaults.forEach((key, value) { 
+                if (_indicators.containsKey(key)) { 
+                  _indicators[key]!.params.clear(); 
+                  _indicators[key]!.params.addAll(value.params); 
+                } 
+              }); 
+            }); 
+            _syncIndicatorSettingsToServer(); 
+            return _indicators; 
+          }, 
+          onToggle: (k, e) { 
+            setState(() { 
+              const oscillators = ['rsi', 'macd', 'stochastic', 'cci', 'ma_dev', 'dmi', 'adx', 'rci', 'momentum', 'roc', 'ultimate', 'trix']; 
+              final isOsc = oscillators.contains(k); 
+              if (e && isOsc) { 
+                _indicators.forEach((key, value) { 
+                  if (oscillators.contains(key) && key != k) value.enabled = false; 
+                }); 
+              } 
+              _indicators[k]!.enabled = e; 
+            }); 
+            _syncIndicatorSettingsToServer(); 
+          }
+        )
+      )
+    );
+  }
+
+  void _showCrossSettings() {
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+        child: CrossSettingsModal(
+          symbol: widget.symbol, interval: _interval, crossHistory: _crossHistory, threshold: _threshold, targetIndicators: _alertTargetIndicators, indicators: _indicators, emailNotificationEnabled: _emailNotificationEnabled, currentPrice: _candles.isNotEmpty ? _candles.last.close : null,
+          onThresholdChanged: (v) async {
+            setState(() => _threshold = v);
+            await _chartService.saveThresholdToServer(symbol: widget.symbol, interval: _interval, threshold: v);
+            final thresholds = await _chartService.getAllThresholdsFromServer(widget.symbol);
+            if (mounted) {
+              context.read<MarketDataProvider>().updateSymbolCache(widget.symbol, thresholds);
+              _loadAllIntervalThresholds();
+            }
+          },
+          onTargetIndicatorsChanged: (v) { setState(() => _alertTargetIndicators = v); _syncIndicatorSettingsToServer(); },
+          onEmailNotificationChanged: (v) { setState(() => _emailNotificationEnabled = v); _syncIndicatorSettingsToServer(); },
+          onClearHistory: () async { await _chartService.clearCrossHistoryOnServer(widget.symbol); await _refreshCrossHistory(); },
+        ),
+      ),
+    );
+  }
+
+  void _showCategorySettings() {
+    showDialog(
+      context: context, 
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent, 
+        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24), 
+        child: Container(
+          decoration: const BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.all(Radius.circular(20))), 
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 40), 
+          child: Column(
+            mainAxisSize: MainAxisSize.min, 
+            children: [
+              Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 24), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), 
+              const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.category_outlined, color: AppColors.primaryLight, size: 20), SizedBox(width: 8), Text('カテゴリー選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))]), 
+              const SizedBox(height: 32), 
+              Column(
+                children: MarketCategory.values.map((cat) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12), 
+                  child: InkWell(
+                    onTap: () { 
+                      Navigator.of(context).pop(); 
+                      Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => HomeScreen(initialCategory: cat)), (route) => false); 
+                    }, 
+                    borderRadius: BorderRadius.circular(12), 
+                    child: Container(
+                      width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20), 
+                      decoration: BoxDecoration(color: widget.category == cat ? AppColors.primary.withAlpha(40) : Colors.white.withAlpha(10), borderRadius: BorderRadius.circular(12), border: Border.all(color: widget.category == cat ? AppColors.primaryLight : Colors.transparent, width: 1.5)), 
+                      child: Row(
+                        children: [
+                          Icon(cat.icon, color: cat == MarketCategory.crypto ? AppColors.crypto : (cat == MarketCategory.forex ? AppColors.forex : AppColors.stock), size: 24), 
+                          const SizedBox(width: 16), 
+                          Text(cat.label, style: TextStyle(color: widget.category == cat ? Colors.white : AppColors.textSecondary, fontWeight: widget.category == cat ? FontWeight.bold : FontWeight.normal, fontSize: 16)), 
+                          const Spacer(), 
+                          if (widget.category == cat) const Icon(Icons.check_circle, color: AppColors.primaryLight, size: 20)
+                        ]
+                      )
+                    )
+                  )
+                )).toList()
+              )
+            ]
+          )
+        )
+      )
+    );
+  }
+
+  // --- Helpers ---
 
   Future<void> _loadCrossSettings() async {
     final threshold = await _chartService.getThresholdFromServer(symbol: widget.symbol, interval: _interval);
@@ -215,10 +471,19 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
 
   Future<void> _refreshCrossHistory() async {
     final serverHistory = await _chartService.getCrossHistoryFromServer(widget.symbol);
-    if (mounted) {
-      setState(() { _crossHistory = _parseServerCrossHistory(serverHistory, _interval); });
+    if (mounted) setState(() { _crossHistory = _parseServerCrossHistory(serverHistory, _interval); });
+  }
+
+  String _getIntervalLabel(String i) {
+    switch (i) {
+      case '5m': return '5分'; case '15m': return '15分'; case '30m': return '30分'; case '1h': return '1時間';
+      case '4h': return '4時間'; case '1d': return '1日'; case '1wk': return '1週間'; case '1mo': return '1ヶ月';
+      default: return i;
     }
   }
+
+  static int _safeInt(dynamic v, int d) => v is int ? v : (v is num ? v.toInt() : (v is String ? int.tryParse(v) ?? d : d));
+  static double _safeDouble(dynamic v, double d) => v is double ? v : (v is num ? v.toDouble() : (v is String ? double.tryParse(v) ?? d : d));
 
   Map<String, IndicatorSettings> _getDefaultIndicators() => {
     'bb': IndicatorSettings(enabled: false, params: {'period': 20, 'stdDev1': 1.0, 'stdDev2': 2.0}),
@@ -245,69 +510,7 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
     'trix': IndicatorSettings(enabled: false, params: {'period': 12}),
   };
 
-  Future<void> _syncIndicatorSettingsToServer() async {
-    final Map<String, dynamic> allParams = {};
-    _indicators.forEach((key, settings) { allParams[key] = settings.params; });
-    await _chartService.saveIndicatorSettingsToServer(
-      symbol: widget.symbol, 
-      bbEnabled: _indicators['bb']?.enabled ?? false, 
-      emaEnabled: _indicators['ema']?.enabled ?? false, 
-      bbPeriod: _safeInt(_indicators['bb']?.params['period'], 20), 
-      bbStdDev: _safeDouble(_indicators['bb']?.params['stdDev2'], 2.0),
-      emaPeriod1: _safeInt(_indicators['ema']?.params['period1'], 10), 
-      emaPeriod2: _safeInt(_indicators['ema']?.params['period2'], 25), 
-      emaPeriod3: _safeInt(_indicators['ema']?.params['period3'], 50), 
-      emailAlertsEnabled: _emailNotificationEnabled,
-      alertTargetIndicators: _alertTargetIndicators,
-      allParams: allParams,
-      rsiEnabled: _indicators['rsi']?.enabled ?? false, 
-      rsiPeriod: _safeInt(_indicators['rsi']?.params['period'], 14), 
-      macdEnabled: _indicators['macd']?.enabled ?? false, 
-      macdFast: _safeInt(_indicators['macd']?.params['fast'], 12), 
-      macdSlow: _safeInt(_indicators['macd']?.params['slow'], 26), 
-      macdSignal: _safeInt(_indicators['macd']?.params['signal'], 9),
-      stochasticEnabled: _indicators['stochastic']?.enabled ?? false, 
-      stochKPeriod: _safeInt(_indicators['stochastic']?.params['kPeriod'], 14), 
-      stochDPeriod: _safeInt(_indicators['stochastic']?.params['dPeriod'], 3), 
-      stochSmooth: _safeInt(_indicators['stochastic']?.params['smooth'], 3),
-      cciEnabled: _indicators['cci']?.enabled ?? false, 
-      cciPeriod: _safeInt(_indicators['cci']?.params['period'], 20),
-    );
-    final thresholds = await _chartService.getAllThresholdsFromServer(widget.symbol);
-    if (mounted) context.read<MarketDataProvider>().updateSymbolCache(widget.symbol, thresholds);
-  }
-
-  Future<void> _handleLogout() async {
-    await context.read<AuthProvider>().logout();
-    if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
-  }
-
-  Color _getCategoryColor() {
-    switch (widget.category) {
-      case MarketCategory.crypto: return AppColors.crypto;
-      case MarketCategory.forex: return AppColors.forex;
-      case MarketCategory.stock: return AppColors.stock;
-    }
-  }
-
-  Widget _buildTimerWidget() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: _isRefreshing ? AppColors.info : (_secondsUntilRefresh <= 10 ? AppColors.warning : AppColors.success),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (_isRefreshing) const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-          else const Icon(Icons.timer, size: 16, color: Colors.white),
-          const SizedBox(width: 4),
-          Text(_isRefreshing ? '更新中' : '${_secondsUntilRefresh}s', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white)),
-        ],
-      ),
-    );
-  }
+  // --- Build Methods ---
 
   @override
   Widget build(BuildContext context) {
@@ -324,21 +527,21 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
                   elevation: 0, scrolledUnderElevation: 0, backgroundColor: AppColors.chartBackground, titleSpacing: 0,
                   leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, size: 20), onPressed: () => Navigator.of(context).pop()),
                   title: GestureDetector(onTap: () => Navigator.of(context).pop(), child: Text('${widget.category.label}一覧', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold))),
-                  actions: [Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: _buildTimerWidget()), IconButton(icon: const Icon(Icons.logout), tooltip: 'ログアウト', onPressed: () => _handleLogout())],
+                  actions: [
+                    Padding(padding: const EdgeInsets.symmetric(vertical: 12), child: ChartTimerWidget(isRefreshing: _isRefreshing, secondsUntilRefresh: _secondsUntilRefresh)), 
+                    IconButton(icon: const Icon(Icons.logout), tooltip: 'ログアウト', onPressed: () => _handleLogout())
+                  ],
                 ),
         ),
       ),
       body: _buildBody(),
-      bottomNavigationBar: _buildFooter(),
+      bottomNavigationBar: DetailFooter(
+        isChartMaximized: _isMaximizedChart, 
+        onHomeTap: () => Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => HomeScreen()), (route) => false), 
+        onChartMaximizeTap: () => setState(() => _isMaximizedChart = !_isMaximizedChart), 
+        onCategoryTap: _showCategorySettings,
+      ),
     );
-  }
-
-  String _getIntervalLabel(String i) {
-    switch (i) {
-      case '5m': return '5分'; case '15m': return '15分'; case '30m': return '30分'; case '1h': return '1時間';
-      case '4h': return '4時間'; case '1d': return '1日'; case '1wk': return '1週間'; case '1mo': return '1ヶ月';
-      default: return i;
-    }
   }
 
   Widget _buildBody() {
@@ -353,103 +556,48 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
       bottom: false,
       child: Column(
         children: [
-          AnimatedSize(duration: const Duration(milliseconds: 300), curve: Curves.easeInOut, child: SizedBox(height: _isMaximizedChart ? 0 : null, child: _isMaximizedChart ? const SizedBox.shrink() : _buildSymbolHeader())),
-          Expanded(child: FinancialChart(candles: _candles, chartType: _chartType, indicators: _indicators, interval: _interval, symbol: widget.symbol, memoCount: _memoCount, isMaximized: _isMaximizedChart, onShowIndicatorSettings: _showIndicatorSettings, onShowChartTypeSettings: _showChartTypeSettings, onMemoPressed: () async { await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => MemoScreen(symbol: widget.symbol))); _loadMemoCount(); })),
+          AnimatedSize(
+            duration: const Duration(milliseconds: 300), 
+            curve: Curves.easeInOut, 
+            child: SizedBox(
+              height: _isMaximizedChart ? 0 : null, 
+              child: _isMaximizedChart 
+                  ? const SizedBox.shrink() 
+                  : DetailSymbolHeader(
+                      symbol: widget.symbol, 
+                      category: widget.category, 
+                      interval: _interval, 
+                      intervalLabel: _getIntervalLabel(_interval), 
+                      hasCrossHistory: _crossHistory.isNotEmpty, 
+                      onIntervalTap: _showIntervalSettings, 
+                      onCrossSettingsTap: _showCrossSettings
+                    )
+            )
+          ),
+          Expanded(
+            child: FinancialChart(
+              candles: _candles, 
+              chartType: _chartType, 
+              indicators: _indicators, 
+              interval: _interval, 
+              symbol: widget.symbol, 
+              memoCount: _memoCount, 
+              isMaximized: _isMaximizedChart, 
+              onShowIndicatorSettings: _showIndicatorSettings, 
+              onShowChartTypeSettings: _showChartTypeSettings, 
+              onMemoPressed: () async { 
+                await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(builder: (_) => MemoScreen(symbol: widget.symbol))); 
+                _loadMemoCount(); 
+              }
+            )
+          ),
         ],
       ),
     );
   }
 
-  Widget _buildSymbolHeader() {
-    String displayName;
-    switch (widget.category) {
-      case MarketCategory.crypto: displayName = widget.symbol.replaceAll('-USD', ''); break;
-      case MarketCategory.forex: displayName = widget.symbol.replaceAll('=X', '').replaceAllMapped(RegExp(r'([A-Z]{3})([A-Z]{3})'), (m) => '${m[1]}/${m[2]}'); break;
-      case MarketCategory.stock: displayName = widget.symbol; break;
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      decoration: const BoxDecoration(color: AppColors.chartBackground),
-      child: Row(
-        children: [
-          const SizedBox(width: 12),
-          Container(padding: const EdgeInsets.all(6), decoration: BoxDecoration(color: _getCategoryColor().withAlpha(30), borderRadius: BorderRadius.circular(8)), child: Icon(widget.category.icon, size: 22, color: _getCategoryColor())),
-          const SizedBox(width: 8),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(displayName, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)), Text('${widget.category.label} • ${widget.symbol}', style: TextStyle(fontSize: 11, color: Colors.grey.shade600))])),
-          Padding(padding: const EdgeInsets.only(right: 8), child: InkWell(onTap: _showIntervalSettings, borderRadius: BorderRadius.circular(20), child: Container(padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8), decoration: BoxDecoration(color: const Color(0xFF1E2C38), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFF4D88FF), width: 1.2), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 4, offset: const Offset(0, 1))]), child: Row(mainAxisSize: MainAxisSize.min, children: [Text(_getIntervalLabel(_interval), style: const TextStyle(color: Color(0xFFFFD54F), fontWeight: FontWeight.bold, fontSize: 15)), const SizedBox(width: 4), const Icon(Icons.keyboard_arrow_down, color: Color(0xFFFFD54F), size: 20)])))),
-          SizedBox(width: 60, height: 48, child: Center(child: GestureDetector(onTap: _showCrossSettings, child: Stack(clipBehavior: Clip.none, children: [Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(gradient: const LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [Color(0xFFF57C00), Color(0xFFE65100)]), borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0xFFFFD54F), width: 1.5), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 6, offset: const Offset(0, 2))]), child: const Icon(Icons.notifications_active, size: 24, color: Color(0xFFFFE082))), if (_crossHistory.isNotEmpty) Positioned(right: -4, top: -4, child: Container(width: 14, height: 14, decoration: BoxDecoration(color: const Color(0xFFFF3B30), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2.0), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.3), blurRadius: 2)])))])))),
-        ],
-      ),
-    );
-  }
-
-  void _showChartTypeSettings() {
-    showDialog(context: context, builder: (context) => Dialog(backgroundColor: Colors.transparent, insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24), child: Stack(clipBehavior: Clip.none, children: [Container(padding: const EdgeInsets.fromLTRB(16, 12, 16, 40), decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(20)), child: Column(mainAxisSize: MainAxisSize.min, children: [Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 24), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.bar_chart, color: AppColors.primaryLight, size: 22), SizedBox(width: 8), Text('チャートタイプ選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))]), const SizedBox(height: 32), LayoutBuilder(builder: (context, constraints) { final itemWidth = (constraints.maxWidth - 12) / 2; return Wrap(spacing: 12, runSpacing: 12, alignment: WrapAlignment.center, children: [_buildChartTypeOption(type: ChartType.heikinAshi, label: '平均足', icon: Icons.bar_chart, width: itemWidth), _buildChartTypeOption(type: ChartType.candlestick, label: 'ローソク足', icon: Icons.candlestick_chart, width: itemWidth), _buildChartTypeOption(type: ChartType.dot, label: 'ドット', icon: Icons.scatter_plot, width: itemWidth), _buildChartTypeOption(type: ChartType.line, label: '折れ線', icon: Icons.show_chart, width: itemWidth)]); })])), Positioned(top: 8, right: 8, child: IconButton(onPressed: () => Navigator.pop(context), icon: Container(padding: const EdgeInsets.all(4), decoration: BoxDecoration(color: Colors.white.withAlpha(20), shape: BoxShape.circle), child: const Icon(Icons.close, color: Colors.white54, size: 20)), tooltip: '閉じる'))])));
-  }
-
-  void _showIntervalSettings() {
-    showDialog(context: context, builder: (context) => Dialog(backgroundColor: Colors.transparent, insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24), child: Stack(clipBehavior: Clip.none, children: [Container(decoration: const BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.all(Radius.circular(20))), padding: const EdgeInsets.fromLTRB(16, 12, 16, 40), child: Column(mainAxisSize: MainAxisSize.min, children: [Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 24), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.access_time, color: AppColors.primaryLight, size: 20), SizedBox(width: 8), Text('時間足選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))]), const SizedBox(height: 32), Wrap(spacing: 12, runSpacing: 16, alignment: WrapAlignment.center, children: _intervals.map((i) => _buildIntervalOption(i)).toList())])), Positioned(top: 8, right: 8, child: IconButton(onPressed: () => Navigator.pop(context), icon: Container(padding: const EdgeInsets.all(4), decoration: BoxDecoration(color: Colors.white.withAlpha(20), shape: BoxShape.circle), child: const Icon(Icons.close, color: Colors.white54, size: 20)), tooltip: '閉じる'))])));
-  }
-
-  Widget _buildIntervalOption(String i) {
-    final bool isSelected = _interval == i;
-    final bool hasThreshold = _allIntervalThresholds.containsKey(i);
-    return GestureDetector(
-      onTap: () { setState(() { _interval = i; }); _loadData(); _loadCrossSettings(); Navigator.pop(context); },
-      child: Container(width: (MediaQuery.of(context).size.width - 100) / 3, padding: const EdgeInsets.symmetric(vertical: 14), decoration: BoxDecoration(color: isSelected ? AppColors.primary.withAlpha(40) : Colors.white.withAlpha(10), borderRadius: BorderRadius.circular(12), border: Border.all(color: isSelected ? AppColors.primaryLight : (hasThreshold ? AppColors.warning.withAlpha(100) : Colors.transparent), width: 1.5)), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Text(_getIntervalLabel(i), style: TextStyle(color: isSelected ? Colors.white : (hasThreshold ? AppColors.warning : AppColors.textSecondary), fontWeight: isSelected || hasThreshold ? FontWeight.bold : FontWeight.normal, fontSize: 15)), if (hasThreshold) ...[const SizedBox(width: 4), const Icon(Icons.notifications_active, size: 16, color: AppColors.warning)]])),
-    );
-  }
-
-  Widget _buildChartTypeOption({required ChartType type, required String label, required IconData icon, required double width}) {
-    final bool isSelected = _chartType == type;
-    return GestureDetector(
-      onTap: () { setState(() { _chartType = type; }); Navigator.pop(context); },
-      child: Container(width: width, padding: const EdgeInsets.symmetric(vertical: 20), decoration: BoxDecoration(color: isSelected ? AppColors.primary.withAlpha(40) : Colors.white.withAlpha(5), borderRadius: BorderRadius.circular(16), border: Border.all(color: isSelected ? AppColors.primaryLight : Colors.white.withAlpha(10), width: isSelected ? 2.0 : 1.0), boxShadow: isSelected ? [BoxShadow(color: AppColors.primary.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 4))] : null), child: Column(children: [Icon(icon, size: 36, color: isSelected ? AppColors.primaryLight : AppColors.textSecondary), const SizedBox(height: 12), Text(label, style: TextStyle(fontSize: 14, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal, color: isSelected ? Colors.white : AppColors.textSecondary))])),
-    );
-  }
-
-  void _showIndicatorSettings() {
-    showDialog(context: context, builder: (context) => Dialog(backgroundColor: Colors.transparent, insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24), child: IndicatorSettingsSheet(indicators: _indicators, onChanged: (k, s) { setState(() => _indicators[k] = s); _syncIndicatorSettingsToServer(); }, onReset: () { setState(() { final defaults = _getDefaultIndicators(); defaults.forEach((key, value) { if (_indicators.containsKey(key)) { _indicators[key]!.params.clear(); _indicators[key]!.params.addAll(value.params); } }); }); _syncIndicatorSettingsToServer(); return _indicators; }, onToggle: (k, e) { setState(() { const oscillators = ['rsi', 'macd', 'stochastic', 'cci', 'ma_dev', 'dmi', 'adx', 'rci', 'momentum', 'roc', 'ultimate', 'trix']; final isOsc = oscillators.contains(k); if (e && isOsc) { _indicators.forEach((key, value) { if (oscillators.contains(key) && key != k) { value.enabled = false; } }); } _indicators[k]!.enabled = e; }); _syncIndicatorSettingsToServer(); })));
-  }
-
-  void _showCrossSettings() {
-    showDialog(
-      context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-        child: CrossSettingsModal(
-          symbol: widget.symbol, interval: _interval, crossHistory: _crossHistory, threshold: _threshold, targetIndicators: _alertTargetIndicators, indicators: _indicators, emailNotificationEnabled: _emailNotificationEnabled, currentPrice: _candles.isNotEmpty ? _candles.last.close : null,
-          onThresholdChanged: (v) async {
-            setState(() => _threshold = v);
-            await _chartService.saveThresholdToServer(symbol: widget.symbol, interval: _interval, threshold: v);
-            final thresholds = await _chartService.getAllThresholdsFromServer(widget.symbol);
-            if (mounted) {
-              context.read<MarketDataProvider>().updateSymbolCache(widget.symbol, thresholds);
-              _loadAllIntervalThresholds();
-            }
-          },
-          onTargetIndicatorsChanged: (v) { setState(() => _alertTargetIndicators = v); _syncIndicatorSettingsToServer(); },
-          onEmailNotificationChanged: (v) { setState(() => _emailNotificationEnabled = v); _syncIndicatorSettingsToServer(); },
-          onClearHistory: () async { await _chartService.clearCrossHistoryOnServer(widget.symbol); await _refreshCrossHistory(); },
-        ),
-      ),
-    );
-  }
-
-  Widget _buildFooter() {
-    return Container(
-      height: 100, padding: const EdgeInsets.only(bottom: 10), decoration: const BoxDecoration(color: AppColors.surface, border: Border(top: BorderSide(color: AppColors.divider, width: 1.0))),
-      child: Row(children: [_buildFooterItem(icon: Icons.home, label: 'ホーム', onTap: () { Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => HomeScreen()), (route) => false); }), _buildFooterItem(icon: Icons.stacked_line_chart, label: 'チャート', isSelected: true, onTap: () { setState(() { _isMaximizedChart = !_isMaximizedChart; }); }), _buildFooterItem(icon: Icons.category_outlined, label: 'カテゴリー', onTap: _showCategorySettings)]),
-    );
-  }
-
-  void _showCategorySettings() {
-    showDialog(context: context, builder: (context) => Dialog(backgroundColor: Colors.transparent, insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24), child: Container(decoration: const BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.all(Radius.circular(20))), padding: const EdgeInsets.fromLTRB(16, 12, 16, 40), child: Column(mainAxisSize: MainAxisSize.min, children: [Container(width: 40, height: 4, margin: const EdgeInsets.only(bottom: 24), decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2))), const Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.category_outlined, color: AppColors.primaryLight, size: 20), SizedBox(width: 8), Text('カテゴリー選択', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white))]), const SizedBox(height: 32), Column(children: MarketCategory.values.map((cat) => Padding(padding: const EdgeInsets.only(bottom: 12), child: InkWell(onTap: () { Navigator.of(context).pop(); Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(MaterialPageRoute(builder: (_) => HomeScreen(initialCategory: cat)), (route) => false); }, borderRadius: BorderRadius.circular(12), child: Container(width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20), decoration: BoxDecoration(color: widget.category == cat ? AppColors.primary.withAlpha(40) : Colors.white.withAlpha(10), borderRadius: BorderRadius.circular(12), border: Border.all(color: widget.category == cat ? AppColors.primaryLight : Colors.transparent, width: 1.5)), child: Row(children: [Icon(cat.icon, color: cat == MarketCategory.crypto ? AppColors.crypto : (cat == MarketCategory.forex ? AppColors.forex : AppColors.stock), size: 24), const SizedBox(width: 16), Text(cat.label, style: TextStyle(color: widget.category == cat ? Colors.white : AppColors.textSecondary, fontWeight: widget.category == cat ? FontWeight.bold : FontWeight.normal, fontSize: 16)), const Spacer(), if (widget.category == cat) const Icon(Icons.check_circle, color: AppColors.primaryLight, size: 20)]))))).toList())]))));
-  }
-
-  Widget _buildFooterItem({required IconData icon, required String label, bool isSelected = false, String? badge, VoidCallback? onTap}) {
-    final color = isSelected ? AppColors.primary : AppColors.textSecondary;
-    return Expanded(child: InkWell(onTap: onTap, child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Stack(clipBehavior: Clip.none, children: [Icon(icon, color: color, size: 28), if (badge != null) Positioned(right: -8, top: -4, child: Container(padding: const EdgeInsets.all(2), decoration: BoxDecoration(color: AppColors.error, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.surface, width: 1.5)), constraints: const BoxConstraints(minWidth: 18, minHeight: 18), child: Text(badge, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold), textAlign: TextAlign.center)))]), const SizedBox(height: 4), Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.normal))])));
+  Future<void> _handleLogout() async {
+    await context.read<AuthProvider>().logout();
+    if (mounted) Navigator.of(context).popUntil((route) => route.isFirst);
   }
 }
