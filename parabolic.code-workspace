@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": ".",
+			"name": "ROOT / NODE SERVER"
+		},
+		{
+			"path": "frontend",
+			"name": "FRONTEND (FLUTTER)"
+		},
+		{
+			"path": "backend",
+			"name": "BACKEND (JAVA)"
+		}
+	],
+	"settings": {
+		"java.project.sourcePaths": ["backend/src"],
+		"dart.flutterSdkPath": null
+	}
+}

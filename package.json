@@ -5,7 +5,11 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "build": "esbuild client.js --bundle --outfile=dist/bundle.js && copy auth.js dist\\auth.js"
+    "build": "esbuild client.js --bundle --outfile=dist/bundle.js && copy auth.js dist\\auth.js",
+    "flutter:run": "cd frontend && flutter run",
+    "flutter:get": "cd frontend && flutter pub get",
+    "java:run": "cd backend && javac src/Main.java -d out && java -cp out Main",
+    "dev": "npm start & npm run flutter:run"
   },
   "dependencies": {
     "@aws-sdk/client-ssm": "^3.474.0",
