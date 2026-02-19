@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls -la \"C:\\\\src\\\\parabolic\\\\parabolic_app\\\\lib\\\\screens\"\" 2>/dev/null || echo \"Directory check failed \")",
+      "Bash(flutter analyze:*)",
+      "Bash(flutter build:*)"
+    ]
+  }
+}

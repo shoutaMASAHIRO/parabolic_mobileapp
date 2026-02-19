@@ -1,0 +1,4 @@
+services:
+  server:
+    volumes:
+      - "${USERPROFILE}/.aws:/root/.aws:ro"

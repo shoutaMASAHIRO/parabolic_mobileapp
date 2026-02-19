@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parabolic Chart</title>
+    <link rel="stylesheet" href="modern.css">
+
+    <style>
+      /* ✅ ヘッダー用の小型スイッチ（既存CSSを壊さないようにprefix付け） */
+      .pc-switch { position: relative; display: inline-block; width: 42px; height: 22px; flex: 0 0 auto; }
+      .pc-switch input { opacity: 0; width: 0; height: 0; }
+      .pc-slider {
+        position: absolute; cursor: pointer; inset: 0;
+        background: rgba(255,255,255,0.28);
+        border-radius: 999px; transition: 0.2s;
+      }
+      .pc-slider:before {
+        content: ""; position: absolute; height: 18px; width: 18px; left: 2px; bottom: 2px;
+        background: #fff; border-radius: 999px; transition: 0.2s;
+      }
+      .pc-switch input:checked + .pc-slider { background: rgba(0, 200, 83, 0.75); }
+      .pc-switch input:checked + .pc-slider:before { transform: translateX(20px); }
+    </style>
+</head>
+<body>
+    <div id="cross-notification" class="hidden"></div>
+
+    <div class="app-grid-container">
+        <!-- ===== App Header ===== -->
+        <header class="app-header">
+            <div class="header-left">
+                <h1 class="app-title">Parabolic</h1>
+                <div class="control-group">
+                    <div id="chart-type-toggle" class="toggle-buttons">
+                        <button id="stockToggle" class="toggle-button active">株価</button>
+                        <button id="usdJpyToggle" class="toggle-button">ドル円</button>
+                        <button id="cryptoToggle" class="toggle-button">仮想通貨</button>
+                    </div>
+                </div>
+            </div>
+            <div class="header-center">
+                <div id="controls" class="header-controls">
+                    <div class="input-group">
+                        <label for="tickers-input">銘柄コード</label>
+                        <input type="text" id="tickers-input" class="form-input" value="7203">
+                    </div>
+                    <div id="crypto-ticker-list-container" class="input-group hidden">
+                        <label for="crypto-ticker-select">銘柄一覧</label>
+                        <select id="crypto-ticker-select" class="form-select"></select>
+                    </div>
+                    <div class="input-group">
+                        <label for="interval-select">間隔</label>
+                        <select id="interval-select" class="form-select">
+                            <option value="1m">1分</option>
+                            <option value="5m">5分</option>
+                            <option value="15m">15分</option>
+                            <option value="30m">30分</option>
+                            <option value="1h">1時間</option>
+                            <option value="1d" selected>日足</option>
+                        </select>
+                    </div>
+
+                    <button id="start-button" class="btn btn-primary">表示開始</button>
+
+                    <!-- ✅ 追加：ログイン時のみ表示する「メール受信」トグル（レイアウト崩れ防止でnowrap） -->
+                    <div id="email-alert-toggle-container" class="hidden"
+                         style="display:flex;align-items:center;gap:8px;margin-left:8px;white-space:nowrap;flex:0 0 auto;">
+                      <label class="pc-switch" aria-label="メール受信の切り替え">
+                        <input type="checkbox" id="email-alert-toggle" checked>
+                        <span class="pc-slider"></span>
+                      </label>
+                      <span id="email-alert-toggle-text" style="font-size:0.9rem;opacity:0.9;">メール受信: ON</span>
+                    </div>
+
+                </div>
+            </div>
+            <div class="header-right">
+                <div id="auth-ui" class="auth-controls">
+                    <span id="user-info" class="hidden"></span>
+                    <button id="login-button" class="btn btn-secondary" onclick="location.href='login.html'">ログイン</button>
+                    <button id="register-button" class="btn btn-secondary" onclick="location.href='register.html'">新規登録</button>
+                    <button id="logout-button" class="btn btn-secondary hidden">ログアウト</button>
+                </div>
+            </div>
+        </header>
+
+        <!-- ===== App Sidebar ===== -->
+        <aside class="app-sidebar">
+            <!-- User Settings Card -->
+            <div id="x-value-controls" class="sidebar-card hidden">
+                <h3 class="card-title">ユーザー設定</h3>
+                <div class="card-content">
+                    <div class="input-group vertical">
+                        <label for="x-value-input" id="x-value-label">通知しきい値 (<span id="x-value-interval-label">x</span>)</label>
+                        <span id="current-x-value" class="value-display">現在の値: --</span>
+                        <input type="text" id="x-value-input" class="form-input" value="0">
+                        <div class="button-group-horizontal">
+                            <button id="save-x-value-button" class="btn btn-secondary">保存</button>
+                            <button id="delete-x-value-button" class="btn btn-danger">削除</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Indicator Settings Card -->
+            <div id="indicator-settings-card" class="sidebar-card">
+                 <h3 class="card-title">テクニカル指標</h3>
+                 <div class="card-content">
+                    <div class="indicator-controls">
+                        <button id="toggle-bb-button" class="btn btn-secondary">BB表示/非表示</button>
+                        <button id="toggle-ema-button" class="btn btn-secondary">EMA表示/非表示</button>
+                    </div>
+                    <div id="indicator-settings" class="collapsible-content">
+                        <div class="input-group vertical">
+                            <label for="bb-period">BB期間</label>
+                            <input type="number" id="bb-period" class="form-input" value="20">
+                        </div>
+                        <div class="input-group vertical">
+                            <label for="bb-stddev">BB標準偏差</label>
+                            <input type="number" id="bb-stddev" class="form-input" value="2" step="0.5">
+                        </div>
+                        <div class="input-group vertical">
+                            <label for="ema1-period">EMA 1期間</label>
+                            <input type="number" id="ema1-period" class="form-input" value="10">
+                        </div>
+                        <div class="input-group vertical">
+                            <label for="ema2-period">EMA 2期間</label>
+                            <input type="number" id="ema2-period" class="form-input" value="25">
+                        </div>
+                        <div class="input-group vertical">
+                            <label for="ema3-period">EMA 3期間</label>
+                            <input type="number" id="ema3-period" class="form-input" value="50">
+                        </div>
+                        <button id="apply-indicators-button" class="btn btn-secondary">設定を反映</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Email/Notification Card -->
+            <div id="notification-card" class="sidebar-card">
+                <h3 class="card-title">通知設定</h3>
+                <div class="card-content">
+                    <div id="subscribe-settings">
+                        <div class="input-group vertical">
+                            <label for="email-input">メールアドレス</label>
+                            <input type="email" id="email-input" class="form-input" placeholder="user@example.com">
+                        </div>
+                        <button id="subscribe-button" class="btn btn-secondary">登録</button>
+                    </div>
+                    <hr>
+                    <div class="email-list-container">
+                        <button id="toggle-email-list-button" class="btn btn-secondary">登録済みメール</button>
+                        <button id="send-email-button" class="btn btn-secondary">テスト送信</button>
+                        <div id="email-list-panel" class="hidden">
+                            <ul id="email-list"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Memo Card -->
+            <div id="memo-card" class="sidebar-card hidden">
+                <h3 class="card-title">メモ機能</h3>
+                <div class="card-content">
+                    <button id="open-memo-modal-button" class="btn btn-secondary">メモを開く</button>
+                </div>
+            </div>
+
+             <!-- Hidden buttons for client.js to find -->
+            <div style="display: none;">
+                <button id="toggle-settings-button"></button>
+                <button id="toggle-subscribe-button"></button>
+            </div>
+        </aside>
+
+        <!-- ===== App Main Content ===== -->
+        <main class="app-main">
+            <div id="charts-container">
+                <!-- Charts will be dynamically inserted here -->
+            </div>
+        </main>
+
+        <!-- ===== App Footer ===== -->
+        <footer class="app-footer">
+            <div id="status-message"></div>
+        </footer>
+    </div>
+    
+    <!-- Memo Modal -->
+    <div id="memo-modal-overlay" class="modal-overlay hidden">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="memo-modal-title" class="modal-title">メモ</h2>
+                <button id="memo-modal-close-button" class="modal-close-button">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div id="memo-editor-container">
+                    <div id="memo-editor">
+                        <textarea id="memo-textarea" placeholder="ここにメモを入力..."></textarea>
+                        <div id="memo-editor-actions">
+                            <button id="cancel-memo-button" class="btn btn-secondary">キャンセル</button>
+                            <button id="save-memo-button" class="btn btn-primary">保存</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="memo-list-container">
+                    <ul id="memo-list">
+                        <!-- Memos will be dynamically inserted here -->
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="dist/bundle.js"></script>
+</body>
+</html>

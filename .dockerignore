@@ -1,0 +1,34 @@
+node_modules
+npm-debug.log
+Dockerfile
+docker-compose*.yml
+.dockerignore
+.git
+.gitignore
+
+# Flutter app (not needed for backend)
+parabolic_app
+
+# IDE and editor
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs
+
+# Test and docs
+__tests__
+*.md
+README*
+
+# Temporary files
+tmp
+temp
+.cache

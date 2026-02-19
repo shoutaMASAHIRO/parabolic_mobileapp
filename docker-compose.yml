@@ -1,0 +1,68 @@
+services:
+  # Backend Node.js server
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    container_name: parabolic_server
+    environment:
+      DATABASE_URL: postgres://user:password@db:5432/parabolic
+      SESSION_SECRET: supersecretkey_replace_with_strong_random_string
+
+      AWS_REGION: ap-northeast-1
+      AWS_DEFAULT_REGION: ap-northeast-1
+      AWS_SDK_LOAD_CONFIG: "1"
+      AWS_PROFILE: parabolic-dev
+
+      # ✅ Windows由来のHOME汚染対策（AWS SDKが ~/.aws を正しく参照できるように固定）
+      HOME: /root
+      AWS_SHARED_CREDENTIALS_FILE: /root/.aws/credentials
+      AWS_CONFIG_FILE: /root/.aws/config
+
+      # ✅ SSMからGmail資格情報を読むために必要（あなたのSSMパラメータ名に置き換える）
+      SSM_GMAIL_USER_PARAM: "/parabolic/gmail/user"
+      SSM_GMAIL_PASS_PARAM: "/parabolic/gmail/pass"
+
+
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # PostgreSQL Database
+  db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: parabolic
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    restart: unless-stopped
+    container_name: parabolic_db
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d parabolic"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Frontend Nginx server
+  # frontend:
+  #   image: nginx:1.21-alpine
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/conf.d/default.conf
+  #     - ./index.html:/usr/share/nginx/html/index.html
+  #     - ./style.css:/usr/share/nginx/html/style.css
+  #     - ./dist:/usr/share/nginx/html/dist
+  #   ports:
+  #     - "8080:80"
+  #   depends_on:
+  #     - server
+  #   restart: unless-stopped
+  #   container_name: parabolic_frontend
+
+volumes:
+  postgres_data:

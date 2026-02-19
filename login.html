@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ログイン - Parabolic Chart</title>
+    <link rel="stylesheet" href="modern.css">
+</head>
+<body>
+    <div class="auth-wrapper">
+        <div class="auth-container">
+            <h1 class="auth-title">ログイン</h1>
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="emailOrUsername" class="form-label">メールアドレスまたはユーザー名</label>
+                    <input type="text" id="emailOrUsername" name="emailOrUsername" class="form-input" required>
+                </div>
+                <div class="form-group">
+                    <label for="password" class="form-label">パスワード</label>
+                    <input type="password" id="password" name="password" class="form-input" required>
+                </div>
+                <button type="submit" class="btn">ログイン</button>
+                <p id="message" class="message"></p>
+            </form>
+            <div class="auth-links">
+                <p>アカウントをお持ちでないですか？ <a href="register.html">新規登録</a></p>
+                <p><a href="/">トップページに戻る</a></p>
+            </div>
+        </div>
+    </div>
+    <script src="dist/auth.js"></script>
+</body>
+</html>
