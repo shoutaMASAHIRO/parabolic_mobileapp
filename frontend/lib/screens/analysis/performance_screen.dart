@@ -5,15 +5,20 @@ import '../../widgets/app_header.dart';
 class PerformanceScreen extends StatelessWidget {
   final String symbol;
   final String performance;
+  final Map<String, dynamic>? rawData;
 
   const PerformanceScreen({
     super.key,
     required this.symbol,
     required this.performance,
+    this.rawData,
   });
 
   @override
   Widget build(BuildContext context) {
+    final latest = rawData?['latest'] ?? {};
+    final hasData = latest.isNotEmpty;
+
     return Scaffold(
       backgroundColor: AppColors.scaffoldBackground,
       appBar: AppHeader(
@@ -27,15 +32,24 @@ class PerformanceScreen extends StatelessWidget {
           children: [
             _buildDetailCard(
               title: symbol,
-              content: performance,
-              description: '企業の直近の営業利益率や成長率などの主要な業績指標です。過去のデータとの比較や同業他社との比較にご活用ください。',
+              content: hasData ? 'EPS: ${latest['EarningsPerShare'] ?? '--'} 円' : performance,
+              description: '企業の収益性を示す主要な業績指標です。1株当たり利益(EPS)や営業利益の推移から、企業の成長ステージを判断することができます。',
             ),
             const SizedBox(height: 24),
-            _buildInfoSection('収益性分析', [
-              '自己資本利益率 (ROE)',
-              '総資産利益率 (ROA)',
-              '営業利益率の推移',
-            ]),
+            if (hasData)
+              _buildInfoSection('業績詳細', [
+                '1株利益(EPS): ${latest['EarningsPerShare'] ?? '--'} 円',
+                '営業利益: ${latest['OperatingProfit'] ?? '--'} 円',
+                '経常利益: ${latest['OrdinaryProfit'] ?? '--'} 円',
+                '総資産: ${latest['TotalAssets'] ?? '--'} 円',
+                '純資産: ${latest['NetAssets'] ?? '--'} 円',
+              ])
+            else
+              _buildInfoSection('収益性分析', [
+                '自己資本利益率 (ROE)',
+                '総資産利益率 (ROA)',
+                '営業利益率の推移',
+              ]),
           ],
         ),
       ),

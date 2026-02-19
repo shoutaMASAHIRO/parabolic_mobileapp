@@ -1859,6 +1859,117 @@ function eventObj(price, interval, extra = {}) {
 }
 
 // =====================
+// J-Quants API Helpers
+// =====================
+let jquantsIdToken = null;
+
+async function getJQuantsIdToken() {
+  const refreshToken = (process.env.JQUANTS_REFRESH_TOKEN || '').trim();
+  if (!refreshToken) {
+    console.warn('[J-Quants] JQUANTS_REFRESH_TOKEN is not set.');
+    return null;
+  }
+
+  try {
+    // J-Quants v1 仕様: POST でクエリパラメータにトークンを載せる
+    const url = `https://api.jquants.com/v1/token/auth_refresh?refreshtoken=${refreshToken}`;
+    console.log('[J-Quants] Attempting auth with token (truncated):', refreshToken.substring(0, 10) + '...');
+    
+    const r = await fetch(url, {
+      method: 'POST',
+    });
+    
+    if (!r.ok) {
+      const errorText = await r.text();
+      throw new Error(`J-Quants auth failed: ${r.status} - ${errorText}`);
+    }
+    const j = await r.json();
+    jquantsIdToken = j.idToken;
+    console.log('[J-Quants] Successfully obtained ID Token');
+    return jquantsIdToken;
+  } catch (e) {
+    console.error('[J-Quants] Auth Error:', e);
+    return null;
+  }
+}
+
+async function fetchJQuants(endpoint) {
+  if (!jquantsIdToken) await getJQuantsIdToken();
+  if (!jquantsIdToken) return null;
+
+  try {
+    let r = await fetch(`https://api.jquants.com/v1${endpoint}`, {
+      headers: { 'Authorization': `Bearer ${jquantsIdToken}` },
+    });
+
+    if (r.status === 401) {
+      // Token expired, retry once
+      await getJQuantsIdToken();
+      r = await fetch(`https://api.jquants.com/v1${endpoint}`, {
+        headers: { 'Authorization': `Bearer ${jquantsIdToken}` },
+      });
+    }
+
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (e) {
+    console.error(`[J-Quants] Fetch Error (${endpoint}):`, e);
+    return null;
+  }
+}
+
+// =====================
+// API: Stock Analysis
+// =====================
+app.get('/api/stock/analysis', async (req, res) => {
+  const { symbol } = req.query;
+  console.log(`[Analysis API] Fetching data for: ${symbol}`);
+  if (!symbol) return res.status(400).json({ error: 'symbol required' });
+
+  // 日本株 (.T) の場合のみ J-Quants を試行
+  if (symbol.endsWith('.T')) {
+    const code = symbol.replace('.T', '');
+    try {
+      console.log(`[J-Quants] Calling API for code: ${code}`);
+      // 財務情報 (Statements) と 銘柄詳細 (Listed Info) を取得
+      // Statements は最新のデータを取得するために code 指定のみで行う
+      const [statements, listedInfo] = await Promise.all([
+        fetchJQuants(`/fin/statements?code=${code}`),
+        fetchJQuants(`/listed/info?code=${code}`),
+      ]);
+
+      if (statements && statements.statements && statements.statements.length > 0) {
+        // 日付順にソートして最新を取得（APIがソート済みとは限らないため）
+        const sortedStatements = statements.statements.sort((a, b) => 
+          new Date(b.DiscloseDate) - new Date(a.DiscloseDate)
+        );
+        const latest = sortedStatements[0];
+        const info = listedInfo?.info?.[0] || {};
+
+        console.log(`[J-Quants] Success! Data found for ${symbol}`);
+
+        return res.json({
+          morningstarRating: `市場: ${info.MarketCodeName || '不明'}`,
+          analystRating: `セクター: ${info.SectorName33 || '不明'}\n区分: ${info.SectorName17 || '不明'}`,
+          earnings: `決算発表: ${latest.DiscloseDate}\n売上高: ${Number(latest.NetSales).toLocaleString()}円`,
+          performance: `営業利益: ${Number(latest.OperatingProfit).toLocaleString()}円\nEPS: ${latest.EarningsPerShare}円`,
+          valuation: `自己資本比率: ${latest.EquityToAssetRatio}%\n純利益: ${Number(latest.Profit).toLocaleString()}円`,
+          revenueComposition: `会社名: ${info.CompanyName || symbol}\n${info.SectorName17}`,
+          rawJQuants: { latest, info }
+        });
+      } else {
+        console.warn(`[J-Quants] No statement data found for ${code}`);
+      }
+    } catch (e) {
+      console.error('[Analysis API] J-Quants error:', e);
+    }
+  }
+
+  console.log(`[Analysis API] Returning null for ${symbol} (Falling back to mock)`);
+  res.json(null);
+});
+
+// =====================
 // Watchers (USDJPY + Crypto)
 // =====================
 async function processUsdJpyForUser(userId, settings) {

@@ -102,6 +102,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                           builder: (context) => EarningsScreen(
                             symbol: widget.symbol,
                             earnings: _analysisData?['earnings'] ?? 'データなし',
+                            rawData: _analysisData?['rawJQuants'],
                           ),
                         ),
                       ),
@@ -117,6 +118,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                           builder: (context) => PerformanceScreen(
                             symbol: widget.symbol,
                             performance: _analysisData?['performance'] ?? 'データなし',
+                            rawData: _analysisData?['rawJQuants'],
                           ),
                         ),
                       ),
@@ -135,6 +137,7 @@ class _AnalysisScreenState extends State<AnalysisScreen> {
                           builder: (context) => ValuationScreen(
                             symbol: widget.symbol,
                             valuation: _analysisData?['valuation'] ?? 'データなし',
+                            rawData: _analysisData?['rawJQuants'],
                           ),
                         ),
                       ),

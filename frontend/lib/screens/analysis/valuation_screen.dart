@@ -5,15 +5,20 @@ import '../../widgets/app_header.dart';
 class ValuationScreen extends StatelessWidget {
   final String symbol;
   final String valuation;
+  final Map<String, dynamic>? rawData;
 
   const ValuationScreen({
     super.key,
     required this.symbol,
     required this.valuation,
+    this.rawData,
   });
 
   @override
   Widget build(BuildContext context) {
+    final latest = rawData?['latest'] ?? {};
+    final hasData = latest.isNotEmpty;
+
     return Scaffold(
       backgroundColor: AppColors.scaffoldBackground,
       appBar: AppHeader(
@@ -27,15 +32,23 @@ class ValuationScreen extends StatelessWidget {
           children: [
             _buildDetailCard(
               title: symbol,
-              content: valuation,
-              description: 'PERやPBRなどの主要な指標に基づく、現在の株価の割安・割高の判断材料です。過去の平均値や市場全体と比較することができます。',
+              content: hasData ? '自己資本比率: ${latest['EquityToAssetRatio'] ?? '--'} %' : valuation,
+              description: '財務の健全性や株価の割安性を示す指標です。自己資本比率は企業の倒産リスクや安定性を測る上で重要な役割を果たします。',
             ),
             const SizedBox(height: 24),
-            _buildInfoSection('割安性指標', [
-              'PER（株価収益率）の歴史的推移',
-              'PBR（株価純資産倍率）の推移',
-              '配当利回り・配当性向',
-            ]),
+            if (hasData)
+              _buildInfoSection('主要財務指標', [
+                '自己資本比率: ${latest['EquityToAssetRatio'] ?? '--'} %',
+                '1株当り純資産: ${latest['BookValuePerShare'] ?? '--'} 円',
+                '発行済株式数: ${latest['NumberOfIssuedAndOutstandingSharesAtTheEndOfFiscalYear'] ?? '--'} 株',
+                '純資産: ${latest['NetAssets'] ?? '--'} 円',
+              ])
+            else
+              _buildInfoSection('割安性指標', [
+                'PER（株価収益率）の歴史的推移',
+                'PBR（株価純資産倍率）の推移',
+                '配当利回り・配当性向',
+              ]),
           ],
         ),
       ),

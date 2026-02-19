@@ -5,12 +5,23 @@ class AnalysisService {
   final ApiService _api = ApiService();
 
   Future<Map<String, dynamic>?> getStockAnalysis(String symbol) async {
-    final response = await _api.get('/api/stock/analysis?symbol=$symbol');
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    final path = '/api/stock/analysis?symbol=$symbol&t=$timestamp';
+    debugPrint('ANALYSIS_SERVICE: Requesting $path');
     
-    if (response.isSuccess && response.json != null) {
-      return response.json;
+    try {
+      final response = await _api.get(path);
+      debugPrint('ANALYSIS_SERVICE: Response status: ${response.statusCode}');
+      debugPrint('ANALYSIS_SERVICE: Response body: ${response.json}');
+      
+      if (response.isSuccess && response.json != null) {
+        return response.json;
+      }
+    } catch (e) {
+      debugPrint('ANALYSIS_SERVICE: Error during API call: $e');
     }
     
+    debugPrint('ANALYSIS_SERVICE: Falling back to mock for $symbol');
     return _generateMockAnalysis(symbol);
   }
 
@@ -20,28 +31,24 @@ class AnalysisService {
     
     if (isCrypto || isForex) {
       return {
-        'morningstarRating': 'N/A (金融商品対象外)',
-        'analystRating': 'コミュニティセンチメント: 強気',
-        'earnings': 'N/A (決算なし)',
-        'performance': '過去1年騰落率: +45.2%',
-        'valuation': '市場支配率: --%',
-        'revenueComposition': '主要用途: 決済・資産保存',
+        'morningstarRating': 'N/A (対象外)',
+        'analystRating': 'センチメント: 取得中...',
+        'earnings': 'N/A',
+        'performance': 'データ取得失敗',
+        'valuation': '--',
+        'revenueComposition': 'シンボル: $symbol',
       };
     }
 
     return {
-      'morningstarRating': '★★★★☆ (割安)',
-      'analystRating': '''強気 (Buy)
-目標株価: ¥${symbol.endsWith('.T') ? '4,500' : '210.00'}''',
-      'earnings': '''2025 Q4 決算
-売上高: 予想比 +5.2% (良好)
-1株利益(EPS): 予想通り''',
-      'performance': '''直近営業利益率: 18.5%
-前年同期比成長率: +12.0%''',
-      'valuation': '''PER: 15.2倍 (過去平均比 低)
-PBR: 1.8倍''',
-      'revenueComposition': '''製品A: 45%, サービス: 35%, その他: 20%
-地域: 北米 60%, アジア 30%, 他 10%''',
+      'morningstarRating': '取得失敗 (モック表示)',
+      'analystRating': '''銘柄: $symbol
+APIとの接続を確認してください。''',
+      'earnings': '''データ取得エラー
+サーバーログを確認してください。''',
+      'performance': '接続先: ${_api.toString()}',
+      'valuation': '時刻: ${DateTime.now().toIso8601String()}',
+      'revenueComposition': 'Symbol: $symbol',
     };
   }
 }

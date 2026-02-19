@@ -1,19 +1,25 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_header.dart';
 
 class EarningsScreen extends StatelessWidget {
   final String symbol;
   final String earnings;
+  final Map<String, dynamic>? rawData;
 
   const EarningsScreen({
     super.key,
     required this.symbol,
     required this.earnings,
+    this.rawData,
   });
 
   @override
   Widget build(BuildContext context) {
+    final latest = rawData?['latest'] ?? {};
+    final hasData = latest.isNotEmpty;
+
     return Scaffold(
       backgroundColor: AppColors.scaffoldBackground,
       appBar: AppHeader(
@@ -27,15 +33,24 @@ class EarningsScreen extends StatelessWidget {
           children: [
             _buildDetailCard(
               title: symbol,
-              content: earnings,
-              description: '直近の決算報告（四半期または通期）の内容です。市場の期待に対する売上高やEPS（1株当たり利益）の結果、および今後の見通しが含まれます。',
+              content: hasData ? '決算期: ${latest['DiscloseDate'] ?? '不明'}' : earnings,
+              description: 'J-Quants API から取得した最新の財務報告内容です。企業の収益性、成長性、および財務健全性を判断するための重要な指標が含まれます。',
             ),
             const SizedBox(height: 24),
-            _buildInfoSection('決算詳細', [
-              '収益の驚き（サプライズ）',
-              'ガイダンスの修正状況',
-              'キャッシュフローの推移',
-            ]),
+            if (hasData)
+              _buildInfoSection('決算詳細 (実数値)', [
+                '売上高: ${NumberFormat("#,###").format(double.tryParse(latest['NetSales']?.toString() ?? '0') ?? 0)} 円',
+                '営業利益: ${NumberFormat("#,###").format(double.tryParse(latest['OperatingProfit']?.toString() ?? '0') ?? 0)} 円',
+                '経常利益: ${NumberFormat("#,###").format(double.tryParse(latest['OrdinaryProfit']?.toString() ?? '0') ?? 0)} 円',
+                '当期純利益: ${NumberFormat("#,###").format(double.tryParse(latest['Profit']?.toString() ?? '0') ?? 0)} 円',
+                '1株利益(EPS): ${latest['EarningsPerShare'] ?? '--'} 円',
+              ])
+            else
+              _buildInfoSection('追加情報', [
+                '収益のサプライズ分析',
+                'ガイダンスの修正状況',
+                'キャッシュフローの推移',
+              ]),
           ],
         ),
       ),
