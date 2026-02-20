@@ -19,9 +19,6 @@ const { Server } = require('socket.io');
 const { BollingerBands, EMA } = require('technicalindicators');
 const { SSMClient, GetParametersCommand } = require('@aws-sdk/client-ssm');
 
-// ✅ Force DATABASE_URL for local debugging with Docker DB
-process.env.DATABASE_URL = 'postgresql://user:password@localhost:5432/parabolic';
-
 const app = express();
 const server = http.createServer(app);
 
@@ -1866,71 +1863,33 @@ function eventObj(price, interval, extra = {}) {
 // =====================
 let jquantsIdToken = null;
 
-async function getJQuantsIdToken() {
-  const refreshToken = (process.env.JQUANTS_REFRESH_TOKEN || '').trim();
-  if (!refreshToken) {
-    console.warn('[J-Quants] JQUANTS_REFRESH_TOKEN is not set.');
+// =====================
+// J-Quants API V2 Helpers
+// =====================
+async function fetchJQuantsV2(endpoint) {
+  const apiKey = (process.env.JQUANTS_REFRESH_TOKEN || '').trim();
+  if (!apiKey) {
+    console.warn('[J-Quants] API Key (JQUANTS_REFRESH_TOKEN) is not set.');
     return null;
   }
 
   try {
-    const url = `https://api.jquants.com/v1/token/auth_refresh?refreshtoken=${refreshToken}`;
-    console.log('[J-Quants] Attempting auth with refresh token...');
-    
-    const r = await fetch(url, { method: 'POST' });
-    
-    if (!r.ok) {
-      const errorText = await r.text();
-      console.error(`[J-Quants] Auth failed: ${r.status} - ${errorText}`);
-      return null;
-    }
-    const j = await r.json();
-    jquantsIdToken = j.idToken;
-    console.log('[J-Quants] Successfully obtained ID Token');
-    return jquantsIdToken;
-  } catch (e) {
-    console.error('[J-Quants] Auth Error:', e);
-    return null;
-  }
-}
-
-async function fetchJQuants(endpoint) {
-  if (!jquantsIdToken) {
-    console.log('[J-Quants] No ID Token, attempting to fetch one...');
-    await getJQuantsIdToken();
-  }
-  if (!jquantsIdToken) {
-    console.error('[J-Quants] Failed to get ID Token, aborting fetch.');
-    return null;
-  }
-
-  try {
-    console.log(`[J-Quants] Fetching: ${endpoint}`);
-    let r = await fetch(`https://api.jquants.com/v1${endpoint}`, {
-      headers: { 'Authorization': `Bearer ${jquantsIdToken}` },
+    console.log(`[J-Quants V2] Fetching: ${endpoint}`);
+    const r = await fetch(`https://api.jquants.com/v2${endpoint}`, {
+      headers: { 'x-api-key': apiKey },
     });
 
-    if (r.status === 401) {
-      console.log('[J-Quants] ID Token expired, retrying auth...');
-      await getJQuantsIdToken();
-      if (!jquantsIdToken) return null;
-      
-      r = await fetch(`https://api.jquants.com/v1${endpoint}`, {
-        headers: { 'Authorization': `Bearer ${jquantsIdToken}` },
-      });
-    }
-
     if (!r.ok) {
       const errorText = await r.text();
-      console.error(`[J-Quants] API Fetch Error (${endpoint}): ${r.status} - ${errorText}`);
+      console.error(`[J-Quants V2] API Error (${endpoint}): ${r.status} - ${errorText}`);
       return null;
     }
     
     const data = await r.json();
-    console.log(`[J-Quants] Successfully fetched data from ${endpoint}`);
+    console.log(`[J-Quants V2] Successfully fetched data from ${endpoint}`);
     return data;
   } catch (e) {
-    console.error(`[J-Quants] Fetch Exception (${endpoint}):`, e);
+    console.error(`[J-Quants V2] Fetch Exception (${endpoint}):`, e);
     return null;
   }
 }
@@ -1946,36 +1905,39 @@ app.get('/api/stock/analysis', async (req, res) => {
   if (symbol.endsWith('.T')) {
     const code = symbol.replace('.T', '');
     try {
-      console.log(`[J-Quants] Processing analysis for code: ${code}`);
+      console.log(`[J-Quants V2] Processing analysis for code: ${code}`);
+      
+      // V2 では財務情報は /equities/statements
+      // 銘柄詳細は /markets/listed_info
       const [statements, listedInfo] = await Promise.all([
-        fetchJQuants(`/fin/statements?code=${code}`),
-        fetchJQuants(`/listed/info?code=${code}`),
+        fetchJQuantsV2(`/equities/statements?code=${code}`),
+        fetchJQuantsV2(`/markets/listed_info?code=${code}`),
       ]);
 
-      if (statements && statements.statements && statements.statements.length > 0) {
-        console.log(`[J-Quants] Found ${statements.statements.length} statements for ${code}`);
-        const sortedStatements = statements.statements.sort((a, b) => 
-          new Date(b.DiscloseDate) - new Date(a.DiscloseDate)
+      if (statements && (statements.statements || statements.data) && (statements.statements || statements.data).length > 0) {
+        const rawList = statements.statements || statements.data;
+        console.log(`[J-Quants V2] Found ${rawList.length} statements for ${code}`);
+        
+        const sortedStatements = rawList.sort((a, b) => 
+          new Date(b.DiscloseDate || b.date) - new Date(a.DiscloseDate || a.date)
         );
         const latest = sortedStatements[0];
-        const info = listedInfo?.info?.[0] || {};
+        const infoList = listedInfo?.info || listedInfo?.data || [];
+        const info = infoList[0] || {};
 
-        console.log(`[J-Quants] Data construction successful for ${symbol}`);
+        console.log(`[J-Quants V2] Data construction successful for ${symbol}`);
 
         return res.json({
-          morningstarRating: `市場: ${info.MarketCodeName || '不明'}`,
-          analystRating: `セクター: ${info.SectorName33 || '不明'}\n区分: ${info.SectorName17 || '不明'}`,
-          earnings: `決算発表: ${latest.DiscloseDate}\n売上高: ${Number(latest.NetSales).toLocaleString()}円`,
-          performance: `営業利益: ${Number(latest.OperatingProfit).toLocaleString()}円\nEPS: ${latest.EarningsPerShare}円`,
-          valuation: `自己資本比率: ${latest.EquityToAssetRatio}%\n純利益: ${Number(latest.Profit).toLocaleString()}円`,
-          revenueComposition: `会社名: ${info.CompanyName || symbol}\n${info.SectorName17}`,
+          morningstarRating: `市場: ${info.MarketCodeName || info.market_name || '不明'}`,
+          analystRating: `セクター: ${info.SectorName33 || info.sector33_name || '不明'}\n区分: ${info.SectorName17 || info.sector17_name || '不明'}`,
+          earnings: `決算発表: ${latest.DiscloseDate || latest.date}\n売上高: ${Number(latest.NetSales || latest.net_sales || 0).toLocaleString()}円`,
+          performance: `営業利益: ${Number(latest.OperatingProfit || latest.operating_profit || 0).toLocaleString()}円\nEPS: ${latest.EarningsPerShare || latest.eps || 0}円`,
+          valuation: `自己資本比率: ${latest.EquityToAssetRatio || latest.equity_to_asset_ratio || 0}%\n純利益: ${Number(latest.Profit || latest.profit || 0).toLocaleString()}円`,
+          revenueComposition: `会社名: ${info.CompanyName || info.company_name || symbol}\n${info.SectorName17 || info.sector17_name || ''}`,
           rawJQuants: { latest, info }
         });
       } else {
-        console.warn(`[J-Quants] No statement data found or failed to fetch for ${code}`);
-        if (statements) {
-          console.log('[J-Quants] Statements object received but empty:', JSON.stringify(statements));
-        }
+        console.warn(`[J-Quants V2] No data found for ${code}`);
       }
     } catch (e) {
       console.error('[Analysis API] J-Quants error:', e);
