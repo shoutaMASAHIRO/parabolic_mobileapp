@@ -19,6 +19,9 @@ const { Server } = require('socket.io');
 const { BollingerBands, EMA } = require('technicalindicators');
 const { SSMClient, GetParametersCommand } = require('@aws-sdk/client-ssm');
 
+// ✅ Force DATABASE_URL for local debugging with Docker DB
+process.env.DATABASE_URL = 'postgresql://user:password@localhost:5432/parabolic';
+
 const app = express();
 const server = http.createServer(app);
 
@@ -1871,17 +1874,15 @@ async function getJQuantsIdToken() {
   }
 
   try {
-    // J-Quants v1 仕様: POST でクエリパラメータにトークンを載せる
     const url = `https://api.jquants.com/v1/token/auth_refresh?refreshtoken=${refreshToken}`;
-    console.log('[J-Quants] Attempting auth with token (truncated):', refreshToken.substring(0, 10) + '...');
+    console.log('[J-Quants] Attempting auth with refresh token...');
     
-    const r = await fetch(url, {
-      method: 'POST',
-    });
+    const r = await fetch(url, { method: 'POST' });
     
     if (!r.ok) {
       const errorText = await r.text();
-      throw new Error(`J-Quants auth failed: ${r.status} - ${errorText}`);
+      console.error(`[J-Quants] Auth failed: ${r.status} - ${errorText}`);
+      return null;
     }
     const j = await r.json();
     jquantsIdToken = j.idToken;
@@ -1894,26 +1895,42 @@ async function getJQuantsIdToken() {
 }
 
 async function fetchJQuants(endpoint) {
-  if (!jquantsIdToken) await getJQuantsIdToken();
-  if (!jquantsIdToken) return null;
+  if (!jquantsIdToken) {
+    console.log('[J-Quants] No ID Token, attempting to fetch one...');
+    await getJQuantsIdToken();
+  }
+  if (!jquantsIdToken) {
+    console.error('[J-Quants] Failed to get ID Token, aborting fetch.');
+    return null;
+  }
 
   try {
+    console.log(`[J-Quants] Fetching: ${endpoint}`);
     let r = await fetch(`https://api.jquants.com/v1${endpoint}`, {
       headers: { 'Authorization': `Bearer ${jquantsIdToken}` },
     });
 
     if (r.status === 401) {
-      // Token expired, retry once
+      console.log('[J-Quants] ID Token expired, retrying auth...');
       await getJQuantsIdToken();
+      if (!jquantsIdToken) return null;
+      
       r = await fetch(`https://api.jquants.com/v1${endpoint}`, {
         headers: { 'Authorization': `Bearer ${jquantsIdToken}` },
       });
     }
 
-    if (!r.ok) return null;
-    return await r.json();
+    if (!r.ok) {
+      const errorText = await r.text();
+      console.error(`[J-Quants] API Fetch Error (${endpoint}): ${r.status} - ${errorText}`);
+      return null;
+    }
+    
+    const data = await r.json();
+    console.log(`[J-Quants] Successfully fetched data from ${endpoint}`);
+    return data;
   } catch (e) {
-    console.error(`[J-Quants] Fetch Error (${endpoint}):`, e);
+    console.error(`[J-Quants] Fetch Exception (${endpoint}):`, e);
     return null;
   }
 }
@@ -1923,30 +1940,27 @@ async function fetchJQuants(endpoint) {
 // =====================
 app.get('/api/stock/analysis', async (req, res) => {
   const { symbol } = req.query;
-  console.log(`[Analysis API] Fetching data for: ${symbol}`);
+  console.log(`[Analysis API] Request received for: ${symbol}`);
   if (!symbol) return res.status(400).json({ error: 'symbol required' });
 
-  // 日本株 (.T) の場合のみ J-Quants を試行
   if (symbol.endsWith('.T')) {
     const code = symbol.replace('.T', '');
     try {
-      console.log(`[J-Quants] Calling API for code: ${code}`);
-      // 財務情報 (Statements) と 銘柄詳細 (Listed Info) を取得
-      // Statements は最新のデータを取得するために code 指定のみで行う
+      console.log(`[J-Quants] Processing analysis for code: ${code}`);
       const [statements, listedInfo] = await Promise.all([
         fetchJQuants(`/fin/statements?code=${code}`),
         fetchJQuants(`/listed/info?code=${code}`),
       ]);
 
       if (statements && statements.statements && statements.statements.length > 0) {
-        // 日付順にソートして最新を取得（APIがソート済みとは限らないため）
+        console.log(`[J-Quants] Found ${statements.statements.length} statements for ${code}`);
         const sortedStatements = statements.statements.sort((a, b) => 
           new Date(b.DiscloseDate) - new Date(a.DiscloseDate)
         );
         const latest = sortedStatements[0];
         const info = listedInfo?.info?.[0] || {};
 
-        console.log(`[J-Quants] Success! Data found for ${symbol}`);
+        console.log(`[J-Quants] Data construction successful for ${symbol}`);
 
         return res.json({
           morningstarRating: `市場: ${info.MarketCodeName || '不明'}`,
@@ -1958,14 +1972,17 @@ app.get('/api/stock/analysis', async (req, res) => {
           rawJQuants: { latest, info }
         });
       } else {
-        console.warn(`[J-Quants] No statement data found for ${code}`);
+        console.warn(`[J-Quants] No statement data found or failed to fetch for ${code}`);
+        if (statements) {
+          console.log('[J-Quants] Statements object received but empty:', JSON.stringify(statements));
+        }
       }
     } catch (e) {
       console.error('[Analysis API] J-Quants error:', e);
     }
   }
 
-  console.log(`[Analysis API] Returning null for ${symbol} (Falling back to mock)`);
+  console.log(`[Analysis API] Final fallback for ${symbol}. Returning null.`);
   res.json(null);
 });
 
