@@ -17,6 +17,7 @@ class CrossSettingsModal extends StatefulWidget {
   final double? currentPrice;
   final Function(double?) onThresholdChanged;
   final Function(List<String>) onTargetIndicatorsChanged;
+  final Function(String, bool) onToggleIndicator;
   final Function(bool) onEmailNotificationChanged;
   final VoidCallback onClearHistory;
 
@@ -32,6 +33,7 @@ class CrossSettingsModal extends StatefulWidget {
     required this.currentPrice,
     required this.onThresholdChanged,
     required this.onTargetIndicatorsChanged,
+    required this.onToggleIndicator,
     required this.onEmailNotificationChanged,
     required this.onClearHistory,
   });
@@ -47,6 +49,7 @@ class _CrossSettingsModalState extends State<CrossSettingsModal> {
   late List<String> _selectedIndicators; // 複数選択用に変更
   List<String> _emails = [];
   bool _le = false;
+  bool _showAddList = false;
 
   @override
   void initState() {
@@ -277,61 +280,7 @@ Sent from parabolic_mobileapp
                                 style: TextStyle(color: AppColors.textSecondary.withOpacity(0.9), fontSize: 12),
                               ),
                               const SizedBox(height: 12),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 10,
-                                children: _getEnabledTrendIndicators().map((key) {
-                                  final isSelected = _selectedIndicators.contains(key);
-                                  return GestureDetector(
-                                    onTap: () {
-                                      setState(() {
-                                        if (isSelected) {
-                                          _selectedIndicators.remove(key);
-                                        } else {
-                                          _selectedIndicators.add(key);
-                                        }
-                                      });
-                                      widget.onTargetIndicatorsChanged(_selectedIndicators);
-                                    },
-                                    child: AnimatedContainer(
-                                      duration: const Duration(milliseconds: 200),
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        color: isSelected ? AppColors.primary.withOpacity(0.12) : Colors.transparent,
-                                        borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(
-                                          color: isSelected ? AppColors.primaryLight : Colors.white.withOpacity(0.1),
-                                          width: isSelected ? 1.8 : 1.0,
-                                        ),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(
-                                            isSelected ? Icons.check_circle_rounded : Icons.add_circle_outline_rounded,
-                                            color: isSelected ? AppColors.primaryLight : Colors.white.withOpacity(0.2),
-                                            size: 16,
-                                          ),
-                                          const SizedBox(width: 8),
-                                          Text(
-                                            _getIndicatorName(key),
-                                            style: TextStyle(
-                                              color: isSelected ? Colors.white : Colors.white.withOpacity(0.5),
-                                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  );
-                                }).toList(),
-                              ),
-                              if (_getEnabledTrendIndicators().isEmpty)
-                                const Padding(
-                                  padding: EdgeInsets.only(top: 8),
-                                  child: Text('有効なトレンド系指標がありません。インジケーター設定から表示してください。', style: TextStyle(color: AppColors.error, fontSize: 11)),
-                                ),
+                              _buildIndicatorSelection(),
                             ],
                           ),
                         ),
@@ -733,23 +682,204 @@ Sent from parabolic_mobileapp
       );
 
   List<String> _getEnabledTrendIndicators() {
-    const trendKeys = ['bb', 'ema', 'sma', 'wma', 'ichimoku', 'parabolic', 'envelope', 'keltner', 'supertrend', 'gmma'];
-    return trendKeys.where((k) => widget.indicators[k]?.enabled ?? false).toList();
+    return IndicatorConfig.trend.where((c) => widget.indicators[c.key]?.enabled ?? false).map((c) => c.key).toList();
   }
 
-  String _getIndicatorName(String key) {
-    switch (key) {
-      case 'bb': return 'ボリンジャーバンド';
-      case 'ema': return 'EMA';
-      case 'sma': return 'SMA';
-      case 'wma': return 'WMA';
-      case 'ichimoku': return '一目均衡表';
-      case 'parabolic': return 'パラボリック';
-      case 'envelope': return 'エンベロープ';
-      case 'keltner': return 'ケルトナー';
-      case 'supertrend': return 'スーパートレンド';
-      case 'gmma': return 'GMMA';
-      default: return key.toUpperCase();
-    }
+  Widget _buildIndicatorSelection() {
+    final enabledTrendKeys = _getEnabledTrendIndicators();
+    final disabledConfigs = IndicatorConfig.trend.where((c) => !enabledTrendKeys.contains(c.key)).toList();
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            ...enabledTrendKeys.map((key) {
+              final isSelected = _selectedIndicators.contains(key);
+              final config = IndicatorConfig.trend.firstWhere((c) => c.key == key);
+              return Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  GestureDetector(
+                    onTap: () {
+                      setState(() {
+                        if (isSelected) {
+                          _selectedIndicators.remove(key);
+                        } else {
+                          _selectedIndicators.add(key);
+                        }
+                      });
+                      widget.onTargetIndicatorsChanged(_selectedIndicators);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isSelected ? config.color.withOpacity(0.12) : Colors.transparent,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: isSelected ? config.color : Colors.white.withOpacity(0.1),
+                          width: isSelected ? 1.8 : 1.0,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isSelected ? Icons.check_circle_rounded : Icons.add_circle_outline_rounded,
+                            color: isSelected ? config.color : Colors.white.withOpacity(0.2),
+                            size: 16,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            config.name,
+                            style: TextStyle(
+                              color: isSelected ? Colors.white : Colors.white.withOpacity(0.5),
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  // 削除ボタン (Registration Toggle)
+                  Positioned(
+                    top: -6,
+                    right: -6,
+                    child: GestureDetector(
+                      onTap: () async {
+                        if (await _showConfirm(title: 'インジケーター解除', message: '${config.name} をチャートから非表示にしますか？')) {
+                          widget.onToggleIndicator(key, false);
+                          setState(() {
+                            _selectedIndicators.remove(key);
+                          });
+                          widget.onTargetIndicatorsChanged(_selectedIndicators);
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: AppColors.surface,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white.withAlpha(20)),
+                          boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 2)],
+                        ),
+                        child: Icon(Icons.close, color: AppColors.error.withOpacity(0.8), size: 12),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            }).toList(),
+            
+            // 追加ボタン
+            if (disabledConfigs.isNotEmpty)
+              GestureDetector(
+                onTap: () => setState(() => _showAddList = !_showAddList),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _showAddList ? AppColors.primary.withOpacity(0.2) : Colors.white.withAlpha(5),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: _showAddList ? AppColors.primaryLight : Colors.white.withAlpha(20),
+                      width: 1.2,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _showAddList ? Icons.keyboard_arrow_up_rounded : Icons.add_rounded,
+                        color: _showAddList ? Colors.white : AppColors.primaryLight,
+                        size: 18,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _showAddList ? '閉じる' : '追加',
+                        style: TextStyle(
+                          color: _showAddList ? Colors.white : AppColors.primaryLight,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+        
+        // 追加可能な指標リスト
+        if (_showAddList && disabledConfigs.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.black26,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withAlpha(10)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.auto_awesome_motion_outlined, color: Colors.white24, size: 14),
+                    SizedBox(width: 8),
+                    Text('利用可能なトレンド指標', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: disabledConfigs.map((config) {
+                    return GestureDetector(
+                      onTap: () {
+                        widget.onToggleIndicator(config.key, true);
+                        setState(() {
+                          if (!_selectedIndicators.contains(config.key)) {
+                            _selectedIndicators.add(config.key);
+                          }
+                        });
+                        widget.onTargetIndicatorsChanged(_selectedIndicators);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: config.color.withAlpha(15),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: config.color.withAlpha(30)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(config.icon, color: config.color, size: 14),
+                            const SizedBox(width: 6),
+                            Text(config.name, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                          ],
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+        ],
+        
+        if (enabledTrendKeys.isEmpty && !_showAddList)
+          const Padding(
+            padding: EdgeInsets.only(top: 12),
+            child: Text('有効なトレンド系指標がありません。「追加」から有効にする指標を選択してください。', style: TextStyle(color: AppColors.warning, fontSize: 11, fontWeight: FontWeight.bold)),
+          ),
+      ],
+    );
   }
 }

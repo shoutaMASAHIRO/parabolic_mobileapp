@@ -35,6 +35,18 @@ class AssetListView extends StatefulWidget {
 
 class _AssetListViewState extends State<AssetListView> {
   final ScrollController _scrollController = ScrollController();
+  final Set<String> _dismissedSymbols = {};
+
+  @override
+  void didUpdateWidget(AssetListView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // データが更新されたら、削除済みリストをリセット（または実際に消えたか確認）
+    // ここではシンプルに、新しいデータに削除済みシンボルが含まれていないことを期待
+    _dismissedSymbols.removeWhere((s) => !widget.data.any((item) {
+      final symbol = item is Map ? item['symbol'] as String : item.toString();
+      return symbol == s;
+    }));
+  }
 
   @override
   void dispose() {
@@ -69,18 +81,27 @@ class _AssetListViewState extends State<AssetListView> {
 
   Future<void> _toggleFavorite(BuildContext context, String symbol, String displayName) async {
     final assetService = AssetService();
+    final isCurrentlyFavorite = widget.favoriteSymbols.contains(symbol);
     final success = await assetService.toggleFavorite(
       symbol, 
-      true, 
+      !isCurrentlyFavorite, // 現在の状態の逆にする
       displayName: displayName,
       category: widget.category.name,
     );
     if (success && context.mounted) {
-      widget.onRefresh();
+      setState(() {
+        if (isCurrentlyFavorite) {
+          widget.favoriteSymbols.remove(symbol);
+        } else {
+          widget.favoriteSymbols.add(symbol);
+        }
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('$symbol をお気に入りに追加しました'),
-          backgroundColor: AppColors.success,
+          content: Text(isCurrentlyFavorite 
+            ? '$symbol をお気に入りから削除しました' 
+            : '$symbol をお気に入りに追加しました'),
+          backgroundColor: isCurrentlyFavorite ? AppColors.error : AppColors.success,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),
@@ -90,6 +111,15 @@ class _AssetListViewState extends State<AssetListView> {
 
   @override
   Widget build(BuildContext context) {
+    // 削除済みのシンボルを除外して表示
+    final displayData = widget.data.where((item) {
+      final symbol = item is Map ? item['symbol'] as String : item.toString();
+      return !_dismissedSymbols.contains(symbol);
+    }).toList();
+
+    // Provider から最新の価格情報を取得するために一度だけ watch
+    final provider = context.watch<MarketDataProvider>();
+
     return Column(
       children: [
         Container(
@@ -104,7 +134,7 @@ class _AssetListViewState extends State<AssetListView> {
           ),
         ),
         Expanded(
-          child: widget.data.isEmpty
+          child: displayData.isEmpty
               ? Center(child: Text('${widget.category.label}データがありません'))
               : RefreshIndicator(
                   onRefresh: widget.onRefresh,
@@ -116,16 +146,14 @@ class _AssetListViewState extends State<AssetListView> {
                     thumbColor: Colors.grey.withOpacity(0.5),
                     child: ListView.builder(
                       controller: _scrollController,
-                      itemCount: widget.data.length,
+                      itemCount: displayData.length,
                       itemBuilder: (context, index) {
-                        final item = widget.data[index];
+                        final item = displayData[index];
                         final symbol = item is Map ? item['symbol'] as String : item.toString();
                         final displayName = item is Map
                             ? item['displayName'] as String
                             : symbol.replaceAll('-USD', '');
                         
-                        // Provider から最新の価格情報を取得
-                        final provider = context.watch<MarketDataProvider>();
                         final priceInfo = provider.getPriceInfo(symbol);
 
                         return Dismissible(
@@ -145,10 +173,10 @@ class _AssetListViewState extends State<AssetListView> {
                           ),
                           onDismissed: (direction) {
                             if (direction == DismissDirection.endToStart) {
+                              setState(() {
+                                _dismissedSymbols.add(symbol);
+                              });
                               _deleteAsset(context, symbol);
-                            } else {
-                              _toggleFavorite(context, symbol, displayName);
-                              widget.onRefresh();
                             }
                           },
                           confirmDismiss: (direction) async {
@@ -165,8 +193,12 @@ class _AssetListViewState extends State<AssetListView> {
                                   ],
                                 ),
                               );
+                            } else if (direction == DismissDirection.startToEnd) {
+                              // お気に入り登録の場合は、アクションだけ実行してスライドを戻す
+                              _toggleFavorite(context, symbol, displayName);
+                              return false;
                             }
-                            return true;
+                            return false;
                           },
                           child: RateListItem(
                             symbol: symbol,

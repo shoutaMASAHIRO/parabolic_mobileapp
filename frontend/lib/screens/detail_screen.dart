@@ -388,6 +388,19 @@ class _DetailScreenState extends State<DetailScreen> with SingleTickerProviderSt
             }
           },
           onTargetIndicatorsChanged: (v) { setState(() => _alertTargetIndicators = v); _syncIndicatorSettingsToServer(); },
+          onToggleIndicator: (k, e) {
+            setState(() {
+              const oscillators = ['rsi', 'macd', 'stochastic', 'cci', 'ma_dev', 'dmi', 'adx', 'rci', 'momentum', 'roc', 'ultimate', 'trix'];
+              final isOsc = oscillators.contains(k);
+              if (e && isOsc) {
+                _indicators.forEach((key, value) {
+                  if (oscillators.contains(key) && key != k) value.enabled = false;
+                });
+              }
+              _indicators[k]!.enabled = e;
+            });
+            _syncIndicatorSettingsToServer();
+          },
           onEmailNotificationChanged: (v) { setState(() => _emailNotificationEnabled = v); _syncIndicatorSettingsToServer(); },
           onClearHistory: () async { await _chartService.clearCrossHistoryOnServer(widget.symbol); await _refreshCrossHistory(); },
         ),
