@@ -77,17 +77,17 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
                     Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(
-                          margin: const EdgeInsets.only(right: 4),
-                          decoration: BoxDecoration(
-                            color: AppColors.primaryLight.withAlpha(30),
-                            shape: BoxShape.circle,
+                        TextButton.icon(
+                          onPressed: _showResetMenu,
+                          icon: const Icon(Icons.settings_backup_restore, color: AppColors.primaryLight, size: 18),
+                          label: const Text(
+                            'リセット',
+                            style: TextStyle(color: AppColors.primaryLight, fontSize: 13, fontWeight: FontWeight.w900, letterSpacing: 0.5),
                           ),
-                          child: IconButton(
-                            onPressed: _showResetMenu,
-                            icon: const Icon(Icons.settings_backup_restore, color: AppColors.primaryLight, size: 24),
-                            tooltip: '設定リセットメニュー',
-                            constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                          style: TextButton.styleFrom(
+                            backgroundColor: AppColors.primaryLight.withAlpha(25),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(100)),
                           ),
                         ),
                         const SizedBox(width: 36), // ×ボタンのためのスペースを確保
@@ -111,7 +111,7 @@ class _IndicatorSettingsSheetState extends State<IndicatorSettingsSheet> {
                               'トレンド系',
                               'チャート上に表示',
                               Icons.show_chart,
-                              AppColors.primary,
+                              AppColors.accent,
                               _trendExpanded,
                               () => setState(() => _trendExpanded = !_trendExpanded),
                               IndicatorConfig.trend.where((c) => _local[c.key]?.enabled ?? false).length,
